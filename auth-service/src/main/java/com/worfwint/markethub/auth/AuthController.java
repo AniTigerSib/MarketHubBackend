@@ -8,19 +8,27 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.worfwint.markethub.auth.events.LoginEventPublisher;
+import com.worfwint.markethub.auth.events.UserRegistered;
+
 @RestController
 public class AuthController {
 
-	private final UserClient userClient;
+	private final UserStore userStore;
 
-	public AuthController(UserClient userClient) {
-		this.userClient = userClient;
+	private final LoginEventPublisher eventPublisher;
+
+	public AuthController(UserStore userStore, LoginEventPublisher eventPublisher) {
+		this.userStore = userStore;
+		this.eventPublisher = eventPublisher;
 	}
 
 	@PostMapping("/auth/login")
 	public LoginResponse login(@RequestBody LoginRequest request) {
-		UserDto user = userClient.findUser(request.username())
+		UserRegistered user = userStore.findByUsername(request.username())
 			.orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Unknown user"));
+
+		eventPublisher.publishLoggedIn(user.username());
 
 		// Placeholder token; replace with a real JWT later
 		String token = UUID.randomUUID().toString();

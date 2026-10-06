@@ -1,1 +1,5 @@
 // Shared plugins and dependencies are configured in the root build.gradle
+
+dependencies {
+	implementation 'org.springframework.boot:spring-boot-starter-kafka'
+}
