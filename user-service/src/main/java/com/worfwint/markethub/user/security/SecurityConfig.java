@@ -29,7 +29,7 @@ public class SecurityConfig {
 			.authorizeHttpRequests(auth -> auth
 				.requestMatchers("/error").permitAll()
 				.requestMatchers("/users/me").authenticated()
-				.requestMatchers(HttpMethod.GET, "/users/*").permitAll()
+				.requestMatchers(HttpMethod.GET, "/users/*", "/users/id/*").permitAll()
 				.anyRequest().authenticated())
 			.oauth2ResourceServer(oauth -> oauth.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter())))
 			.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))

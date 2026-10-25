@@ -1,3 +1,3 @@
 rootProject.name = 'markethub'
 
-include 'user-service', 'auth-service', 'gateway'
+include 'user-service', 'auth-service', 'listing-service', 'gateway'

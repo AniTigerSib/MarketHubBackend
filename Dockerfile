@@ -11,6 +11,7 @@ COPY gradlew settings.gradle build.gradle ./
 COPY gradle gradle
 COPY user-service user-service
 COPY auth-service auth-service
+COPY listing-service listing-service
 COPY gateway gateway
 # The Gradle distribution and downloaded dependencies live in a build cache shared by all
 # service images and kept between builds, so each file is downloaded only once.

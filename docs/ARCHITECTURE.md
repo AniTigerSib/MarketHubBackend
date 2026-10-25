@@ -1,9 +1,10 @@
 # MarketHub Backend Architecture
 
-MarketHub's backend is a set of small Spring Boot services. Clients talk only to an API
-gateway. Behind it, each service owns its own database, and services share information
-through Kafka events instead of calling each other. The one exception is that services
-fetch auth-service's **public keys** so they can check access tokens themselves.
+MarketHub's backend is a set of small Spring Boot services for a classifieds marketplace.
+Clients talk only to an API gateway. Behind it, each service owns its own database, and
+services share information through Kafka events instead of calling each other. The one
+exception is that services fetch auth-service's **public keys** so they can check access
+tokens themselves.
 
 - **Stack:** Java 21, Spring Boot 4.0.8, Spring Cloud 2025.1.3, PostgreSQL 18, Apache Kafka 4.3 (KRaft), Gradle multi-module
 - **Data access:** plain SQL through Spring's `JdbcClient` (no JPA/Hibernate); schema managed by Flyway
@@ -14,44 +15,49 @@ fetch auth-service's **public keys** so they can check access tokens themselves.
 ## 1. Overview
 
 ```
-                                 client
-                                   │ HTTP :8080
-                           ┌───────▼────────┐
-                           │    gateway     │  Spring Cloud Gateway (WebMVC)
-                           │  routes only   │  no auth checks of its own
-                           └───┬────────┬───┘
-                     /users/** │        │ /auth/**
-                ┌──────────────▼─┐    ┌─▼──────────────┐
-                │  user-service  │◄───┤  auth-service  │  public keys (JWKS),
-                │     :8081      │    │     :8082      │  fetched once and cached
-                └───┬────────▲───┘    └──┬──────────┬──┘
-                    │        │ consumes  │ produces │
-               ┌────▼───┐  ┌─┴───────────▼──┐  ┌────▼───┐
-               │user-db │  │     Kafka      │  │auth-db │
-               │Postgres│  │ user.registered│  │Postgres│
-               └────────┘  │ user.logged-in │  └────────┘
-                           └────────────────┘
+                                     client
+                                       │ HTTP :8080
+                               ┌───────▼────────┐
+                               │    gateway     │  Spring Cloud Gateway (WebMVC)
+                               │  routes only   │  no auth checks of its own
+                               └──┬─────┬────┬──┘
+                      /users/**   │     │    │  /listings/** /categories/**
+                ┌─────────────────┘     │    └──────────┐  /cities/** /favorites/**
+                │             /auth/**  │               │
+       ┌────────▼───────┐    ┌──────────▼─────┐   ┌─────▼───────────┐
+       │  user-service  │◄───┤  auth-service  ├──►│ listing-service │   public keys (JWKS),
+       │     :8081      │    │     :8082      │   │      :8083      │   fetched once and cached
+       └──┬─────────▲───┘    └──┬──────────┬──┘   └────────┬────────┘
+          │         │consumes   │ produces │               │
+     ┌────▼───┐  ┌──┴───────────▼──┐  ┌────▼───┐     ┌─────▼──────┐
+     │user-db │  │      Kafka      │  │auth-db │     │ listing-db │
+     │Postgres│  │ user.registered │  │Postgres│     │  Postgres  │
+     └────────┘  │ user.logged-in  │  └────────┘     └────────────┘
+                 └─────────────────┘
 ```
 
 Each database is used by one service only. `user.logged-in` has no consumer yet.
+listing-service doesn't use Kafka; it only needs a user's id, which comes from the token.
 
 | Component | Port (host) | Role | Owns |
 |---|---|---|---|
 | **gateway** | 8080 | Single public entry point; routes by URL path | nothing |
 | **auth-service** | internal 8082 | Registration, login, tokens, signing keys | `auth-db`: accounts, roles, refresh tokens, signing keys |
 | **user-service** | internal 8081 | User profiles | `user-db`: profiles |
+| **listing-service** | internal 8083 | Listings, catalog, search, favorites | `listing-db`: categories, subcategories, cities, listings, favorites |
 | **kafka** | 9092 | Event bus between services | topics `user.registered`, `user.logged-in` |
 | **auth-db** | 5434 | PostgreSQL 18 for auth-service only | |
 | **user-db** | 5433 | PostgreSQL 18 for user-service only | |
+| **listing-db** | 5435 | PostgreSQL 18 for listing-service only | |
 
 The host ports for Kafka and the databases are published only so services can be run from
-an IDE. auth-service and user-service aren't published; outside Docker, the gateway is the
-only way to reach them.
+an IDE. The three services aren't published; outside Docker, the gateway is the only way
+to reach them.
 
 ### Key ideas
 
-1. **Database per service.** Neither service can read the other's tables. Each copies the data it needs from events.
-2. **One identity id.** auth-service generates a UUID for each account. user-service uses the same id as its primary key, and it's the `sub` claim of every access token.
+1. **Database per service.** No service can read another's tables. Each copies the data it needs from events, or uses ids.
+2. **One identity id.** auth-service generates a UUID for each account. user-service uses it as its primary key, listing-service stores it as a listing's `seller_id`, and it's the `sub` claim of every access token.
 3. **Auth-service owns identity.** Username, email and password live in auth-service. user-service keeps a read-only copy of username and email, and owns the profile fields (display name, avatar, phone).
 4. **Tokens are checked locally.** auth-service signs tokens with a private RSA key. Other services check them with the matching public key, so they don't call auth-service on every request.
 
@@ -65,6 +71,7 @@ only way to reach them.
 |---|---|
 | `/auth/**` | `AUTH_SERVICE_URL` (default `http://localhost:8082`) |
 | `/users/**` | `USER_SERVICE_URL` (default `http://localhost:8081`) |
+| `/listings/**`, `/categories/**`, `/cities/**`, `/favorites/**` | `LISTING_SERVICE_URL` (default `http://localhost:8083`) |
 
 The gateway is a plain router. It doesn't check tokens, rate-limit, or change requests;
 each service enforces its own security. `/.well-known/jwks.json` isn't routed, so the JWKS
@@ -125,7 +132,7 @@ client ──POST /auth/register──► AuthService.register
 
 The event is published only after the transaction commits, so user-service never sees an
 account that was rolled back. The Kafka send doesn't wait for confirmation (see
-[Limitations](#9-known-limitations)).
+[Limitations](#10-known-limitations)).
 
 ### 3.4 Login
 
@@ -200,7 +207,7 @@ in one transaction:
 ```
 
 All auth-service instances and restarts therefore share one key. Tokens issued before a
-restart keep working; this was checked with the running stack.
+restart keep working.
 
 `GET /.well-known/jwks.json` returns the **public** halves of:
 - every key that isn't retired, and
@@ -221,6 +228,7 @@ The schema is ready for key rotation (`retired_at`), but nothing rotates keys au
 | Method & path | Auth | Body | Response |
 |---|---|---|---|
 | `GET /users/{username}` | public | | `200 {id, username, displayName, avatarUrl}`; email and phone stay hidden. `404` if unknown. Username lookup ignores case. |
+| `GET /users/id/{id}` | public | | Same public profile, looked up by user id. Used to show a listing's seller, since listings store the seller's id. |
 | `GET /users/me` | Bearer token | | `200 {id, username, email, displayName, avatarUrl, phone}`. `401` without a valid token. |
 | `PUT /users/me` | Bearer token | `{displayName, avatarUrl?, phone?}` | `200` updated profile. Replaces all three fields; `null` clears the avatar or phone. |
 
@@ -235,7 +243,7 @@ until the Kafka event has been processed.
 
 ### 4.2 Token verification
 
-`user-service/.../security/SecurityConfig.java`
+`user-service/.../security/SecurityConfig.java` (listing-service uses the same setup)
 
 ```
 request with "Authorization: Bearer <jwt>"
@@ -248,10 +256,10 @@ request with "Authorization: Bearer <jwt>"
 ```
 
 - The key set is downloaded on first use and cached. A token with an unknown `kid` triggers a fresh download, so new keys need no restart.
-- user-service doesn't need auth-service to be up when it starts.
+- The service doesn't need auth-service to be up when it starts.
 - Sessions are stateless, and CSRF protection is off because tokens are sent in a header, never as cookies.
 
-Access rules: `/error` is open, `/users/me` needs a token, `GET /users/*` is open, and everything else needs a token.
+Access rules: `/error` is open, `/users/me` needs a token, `GET /users/*` and `GET /users/id/*` are open, and everything else needs a token.
 
 ### 4.3 Database (`user-db`)
 
@@ -282,12 +290,130 @@ user edited.
 
 ---
 
-## 5. Kafka events
+## 5. listing-service
+
+Holds what people sell: the catalog (categories, subcategories, cities), listings, search
+and favorites. Tokens are checked the same way as in user-service (section 4.2).
+
+### 5.1 HTTP API
+
+| Method & path | Auth | Purpose |
+|---|---|---|
+| `GET /categories` | public | All 10 categories with their subcategories, names in English and Russian, and the number of active listings in each |
+| `GET /cities` | public | The 5 cities, names in English and Russian |
+| `GET /listings` | public (token optional) | Search active listings: filters, sort, pagination (5.3) |
+| `GET /listings/{id}` | public (token optional) | One listing. Archived listings are visible only to their seller; others get `404`. |
+| `POST /listings` | token | Create a listing; it goes live immediately. `201` with the listing. |
+| `PUT /listings/{id}` | token, seller only | Replace all editable fields. `403` for other users, `409` if archived. |
+| `POST /listings/{id}/archive` | token, seller only | "Mark as sold": removes it from search. Repeating it is harmless. |
+| `GET /listings/mine?status=active\|archived` | token | The caller's listings, newest first, plus `counts` per status for the account tabs |
+| `GET /favorites?page&size` | token | The caller's saved listings, most recently saved first (including ones archived since) |
+| `PUT /favorites/{listingId}` | token | Save a listing; repeating it is harmless. `404` if the listing isn't active. |
+| `DELETE /favorites/{listingId}` | token | Remove from favorites |
+
+When a request to a public endpoint carries a token, listings also report whether the caller
+saved them (`favorite: true`). Without one, `favorite` is always `false`.
+
+**Listing body** (create and update):
+
+```json
+{
+  "categoryId": "electronics", "subcategoryId": "phones", "cityId": "msk",
+  "title": "iPhone 13, 128 GB, blue",
+  "description": "Battery 89%, always in a case. Box and cable included.",
+  "price": 41990, "priceUnit": null,
+  "condition": "used", "sellerType": "private",
+  "photoUrls": ["https://…/cover.jpg"],
+  "contactByMessages": true, "contactByPhone": false
+}
+```
+
+| Field | Rule |
+|---|---|
+| `categoryId`, `subcategoryId`, `cityId` | Must exist (from `/categories`, `/cities`), and the subcategory must belong to the category. Otherwise `400`. |
+| `title` | 5–100 characters |
+| `description` | 30–4000 characters |
+| `price` | Whole rubles, 0 or more |
+| `priceUnit` | `null` for a one-off price, `"month"` (rent, salary) or `"sqm"` (per square metre) |
+| `condition` | `"new"` or `"used"` |
+| `sellerType` | `"private"` or `"business"` |
+| `photoUrls` | Up to 10 `http(s)` URLs; the first is the cover. Stored as given; there's no upload yet. |
+| `contactByMessages`, `contactByPhone` | At least one must be `true` |
+
+**Listing response** adds `id` (a number, shown as "Listing No."), `sellerId`, `status`
+(`active` or `archived`), `favoritesCount`, `favorite`, `createdAt` and `updatedAt`. It
+returns ids for category, subcategory and city; the client looks up their names from
+`/categories` and `/cities`. To show the seller, the client calls `GET /users/id/{sellerId}`.
+
+### 5.2 Database (`listing-db`)
+
+Migrations: `listing-service/src/main/resources/db/migration/`
+
+```
+V1  categories ──< subcategories          cities      (+ seed data from the design)
+          │              │                   │
+V2        └──────────────┴──< listings >─────┘
+                                 │
+V3                               └──< favorites
+```
+
+| Table | Notes |
+|---|---|
+| `categories` | `id` (e.g. `electronics`), `name_en`, `name_ru`, `position`. 10 rows seeded. |
+| `subcategories` | `id` (e.g. `phones`), `category_id`, names, `position`. 32 rows seeded. |
+| `cities` | `id` (e.g. `msk`), names, `position`. 5 rows seeded. |
+| `listings` | `id` BIGINT identity, `seller_id` UUID, category/subcategory/city, `title`, `description`, `price`, `price_unit`, `item_condition`, `seller_type`, `photo_urls` TEXT[], contact flags, `status`, timestamps, `search_vector`. |
+| `favorites` | `(user_id, listing_id)` primary key, `created_at`. Rows are deleted with their listing. |
+
+The database itself enforces the field rules:
+- The `(category_id, subcategory_id)` pair has a foreign key to `subcategories`, so a listing can't pair a subcategory with the wrong category.
+- CHECK constraints cover title and description length, price ≥ 0, the allowed values for unit, condition, seller type and status, at most 10 photos, and at least one contact method.
+
+`search_vector` is a generated column: `to_tsvector('simple', title || ' ' || description)`,
+with a GIN index. The `simple` configuration doesn't apply language-specific word endings,
+so Russian and English text are both indexed as written. There are also indexes for browsing
+by category, sorting by price, and listing a seller's ads.
+
+### 5.3 Search
+
+`GET /listings` parameters (all optional):
+
+| Parameter | Effect |
+|---|---|
+| `q` | Text search over title and description. Every word must match, and each word matches as a prefix, so `iphon` finds "iPhone" and `велосип` finds "велосипед". Up to 10 words; punctuation is ignored. |
+| `category`, `subcategory`, `city` | Exact match by id |
+| `minPrice`, `maxPrice` | Price range, inclusive |
+| `condition` | Repeatable: `?condition=new&condition=used` |
+| `sellerType` | `private` or `business` |
+| `withPhoto=true` | Only listings with at least one photo |
+| `sort` | `new` (default, newest first), `cheap`, `expensive` |
+| `page`, `size` | 0-based page; size 1–100, default 24 |
+
+Response: `{items: [...listings], total, page, size}`. Only active listings are returned.
+
+The text query is built safely: only letters and digits are kept from `q`, and each word
+becomes `word:*` joined with `&`, passed to `to_tsquery('simple', …)` as a parameter. All
+filters are SQL parameters; nothing from the request is pasted into the SQL.
+
+### 5.4 Listing lifecycle
+
+```
+POST /listings ──► active ──POST /archive──► archived
+                     │  ▲                       (hidden from search and from other users,
+                     └──┘ PUT (seller edits)     can't be edited or newly favorited)
+```
+
+There's no moderation yet, so new listings are public right away. The design's draft,
+in-review and rejected states come with moderation.
+
+---
+
+## 6. Kafka events
 
 Single-node Kafka 4.3 in KRaft mode (no ZooKeeper). Containers connect to `kafka:19092`; the
 host uses `localhost:9092`. Messages are JSON without type headers, and each service has its
-own copy of the event records. Both services declare both topics with the same settings, so
-either can start first.
+own copy of the event records. auth-service and user-service both declare both topics with
+the same settings, so either can start first.
 
 | Topic | Partitions | Cleanup | Key | Payload | Producer → Consumer |
 |---|---|---|---|---|---|
@@ -300,9 +426,9 @@ start from the earliest offset.
 
 ---
 
-## 6. End-to-end request flows
+## 7. End-to-end request flows
 
-**New user to authenticated request**
+**New user to posting a listing**
 
 ```
 1  POST /auth/register ─► gateway ─► auth-service ─► auth-db (account + role)
@@ -310,17 +436,19 @@ start from the earliest offset.
 2                                                         └─► user-service ─► user-db (profile)
 3  POST /auth/login    ─► gateway ─► auth-service ─► auth-db (last login, refresh token)
                        ◄─ {accessToken (RS256 JWT), refreshToken}
-4  GET /users/me  + Bearer ─► gateway ─► user-service
+4  POST /listings + Bearer ─► gateway ─► listing-service
                                           ├─ (first time) GET auth-service/.well-known/jwks.json
                                           ├─ verify signature / exp / iss locally
-                                          └─► user-db (profile where id = sub)
-5  POST /auth/refresh ─► auth-service: rotate refresh token, new pair
-6  POST /auth/logout  ─► auth-service: revoke refresh token
+                                          └─► listing-db (seller_id = token sub)
+5  GET /listings?q=…      ─► gateway ─► listing-service ─► listing-db (full-text search)
+6  GET /users/id/{sellerId} ─► gateway ─► user-service  (seller card on the listing page)
+7  PUT /favorites/{id} + Bearer ─► listing-service ─► listing-db
+8  POST /auth/refresh / logout ─► auth-service
 ```
 
 ---
 
-## 7. Configuration
+## 8. Configuration
 
 | Service | Property / env var | Default (IDE) | Docker value |
 |---|---|---|---|
@@ -329,28 +457,29 @@ start from the earliest offset.
 | auth-service | `markethub.jwt.access-token-ttl` | `15m` | |
 | auth-service | `markethub.jwt.refresh-token-ttl` | `30d` | |
 | user-service | `spring.datasource.url` / `SPRING_DATASOURCE_URL` | `jdbc:postgresql://localhost:5433/users` | `jdbc:postgresql://user-db:5432/users` |
-| user-service | `markethub.security.jwk-set-uri` / `JWK_SET_URI` | `http://localhost:8082/.well-known/jwks.json` | `http://auth-service:8082/.well-known/jwks.json` |
-| user-service | `markethub.security.issuer` | `markethub-auth` | |
-| both | `spring.kafka.bootstrap-servers` / `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | `kafka:19092` |
-| gateway | `USER_SERVICE_URL`, `AUTH_SERVICE_URL` | `http://localhost:8081` / `:8082` | service names |
+| listing-service | `spring.datasource.url` / `SPRING_DATASOURCE_URL` | `jdbc:postgresql://localhost:5435/listings` | `jdbc:postgresql://listing-db:5432/listings` |
+| user-, listing-service | `markethub.security.jwk-set-uri` / `JWK_SET_URI` | `http://localhost:8082/.well-known/jwks.json` | `http://auth-service:8082/.well-known/jwks.json` |
+| user-, listing-service | `markethub.security.issuer` | `markethub-auth` | |
+| auth-, user-service | `spring.kafka.bootstrap-servers` / `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | `kafka:19092` |
+| gateway | `USER_SERVICE_URL`, `AUTH_SERVICE_URL`, `LISTING_SERVICE_URL` | `http://localhost:8081` / `:8082` / `:8083` | service names |
 
 Database credentials are development values set in `docker-compose.yml`
-(`user_service`/`user_service`, `auth_service`/`auth_service`).
+(`user_service`, `auth_service`, `listing_service`, each with the same password).
 
-The issuer must be the same string in both services, or user-service rejects every token.
+The issuer must be the same string in every service, or tokens are rejected.
 
 ---
 
-## 8. Build, run and test
+## 9. Build, run and test
 
 ### Project layout
 
 ```
 build.gradle            shared plugins & dependencies (Boot, Lombok, web, test)
-settings.gradle         modules: gateway, auth-service, user-service
+settings.gradle         modules: gateway, auth-service, user-service, listing-service
 Dockerfile              one image recipe for all services (--build-arg SERVICE=…)
 docker/maven-mirror.init.gradle   Docker builds resolve from Google's Maven Central mirror
-docker-compose.yml      kafka, user-db, auth-db, gateway, auth-service, user-service
+docker-compose.yml      kafka, 3 databases, gateway, 3 services
 <service>/src/main/resources/db/migration/   Flyway migrations
 ```
 
@@ -358,45 +487,52 @@ docker-compose.yml      kafka, user-db, auth-db, gateway, auth-service, user-ser
 
 - **Build stage:** JDK 21 runs `./gradlew :<service>:bootJar`.
 - **Downloads:** dependencies come from Google's Maven Central mirror first. On some networks `repo.maven.apache.org` randomly returns 403, and Gradle doesn't retry those.
-- **Build cache:** the Gradle cache lives in a BuildKit cache mount, shared by all three images and kept between builds. It's locked, so parallel builds take turns on that step; Gradle's own locking doesn't work across separate build containers. This needs `docker buildx`.
+- **Build cache:** the Gradle cache lives in a BuildKit cache mount, shared by all service images and kept between builds. It's locked, so parallel builds take turns on that step; Gradle's own locking doesn't work across separate build containers. This needs `docker buildx`.
 - **Runtime stage:** a JRE 21 image running the jar as a non-root user.
 
 ### Startup order (compose)
 
-`kafka` (health: broker API), `user-db` and `auth-db` (health: `pg_isready`) → `auth-service`,
-`user-service` (wait for healthy Kafka and their own DB) → `gateway`. Flyway migrates each
-database when its service starts.
+`kafka` (health: broker API) and the three databases (health: `pg_isready`) start first.
+auth-service and user-service wait for healthy Kafka and their own database; listing-service
+waits for its database. The gateway starts after the services. Flyway migrates each database
+when its service starts.
 
 ### Commands
 
 ```bash
 docker compose up -d --build     # build and start everything
-docker compose logs -f auth-service user-service
+docker compose logs -f auth-service user-service listing-service
 docker compose down              # stop, keep data
-docker compose down -v           # stop and wipe both databases
+docker compose down -v           # stop and wipe all databases
 ./gradlew test                   # all tests; DB tests need Docker
 ```
 
-### Tests (20)
+### Tests (33)
 
 | Test | Kind | Covers |
 |---|---|---|
 | `AuthControllerTests` | Web slice, mocked service | request validation, status codes, JSON shape |
 | `AuthFlowIntegrationTests` | Full app + Postgres (Testcontainers) | register → login by username/email → token verified with the **public JWKS key only** → refresh rotation → reuse detection → logout; duplicate checks ignoring case |
-| `UserControllerTests` | Web slice + security config | public vs `/me` access, token required, validation |
+| `UserControllerTests` | Web slice + security config | public vs `/me` access, lookup by id, token required, validation |
 | `UserRepositoryTests` | JDBC slice + Postgres (Testcontainers) | migrations, upsert is safe to repeat and keeps edited fields, lookup ignoring case, DB phone constraint |
+| `ListingControllerTests` | Web slice + security config | public search, which endpoints need a token, listing and search validation |
+| `ListingFlowIntegrationTests` | Full app + Postgres (Testcontainers) | create → edit (seller only) → archive → hidden from others; catalog id checks; every search filter, prefix search in English and Russian, all sorts, pagination; category counts; favorites and the per-user `favorite` flag |
 
 The Testcontainers tests are skipped automatically when Docker isn't available.
 
 ---
 
-## 9. Known limitations
+## 10. Known limitations
 
 | Area | Limitation | Usual fix |
 |---|---|---|
 | Events | Registration commits to the DB, then sends to Kafka without waiting. If Kafka is down, the account exists but no profile is created. | Transactional outbox table + relay |
 | Keys | Private keys are stored unencrypted in `auth-db`. Keys are never rotated automatically. | Encrypt with a KMS/master key; scheduled rotation |
 | Tokens | Access tokens can't be revoked before they expire (≤ 15 min). Expired refresh-token rows are never deleted. | Short TTL (current) or a deny-list; cleanup job |
+| Tokens | An expired or invalid token on a public endpoint (e.g. search) gets `401` instead of being ignored. The client should drop it or refresh first. | Treat bad tokens as anonymous on public endpoints |
+| Listings | No moderation: listings go live immediately, with no draft, in-review or rejected states. | Moderation flow + `MODERATOR` role |
+| Listings | Photos are URLs supplied by the client; nothing is uploaded, stored or checked. | Upload endpoint + object storage (S3/MinIO) |
+| Listings | No view counts; seller name needs a separate call to user-service. | View counter; or copy seller names into listing-service from events |
 | Gateway | Doesn't validate tokens or rate-limit; each service must protect itself. | Token check / rate limiting at the gateway |
 | Identity changes | No endpoints to change username, email or password, so nothing publishes identity updates yet (user-service's upsert already handles them). | Add endpoints + `user.updated` event |
 | Roles | `ADMIN` exists, but nothing assigns it and no endpoint requires it. | Admin tooling |

@@ -51,6 +51,16 @@ class UserControllerTests {
 	}
 
 	@Test
+	void publicProfileByIdNeedsNoToken() throws Exception {
+		given(userRepository.findById(ALICE_ID)).willReturn(Optional.of(ALICE));
+
+		mockMvc.perform(get("/users/id/" + ALICE_ID))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.username").value("alice"))
+			.andExpect(jsonPath("$.email").doesNotExist());
+	}
+
+	@Test
 	void returns404ForUnknownUser() throws Exception {
 		given(userRepository.findByUsername("nobody")).willReturn(Optional.empty());
 

@@ -56,6 +56,22 @@ services:
       timeout: 5s
       retries: 20
 
+  listing-db:
+    image: postgres:18.1
+    ports:
+      - "5435:5432"
+    environment:
+      POSTGRES_DB: listings
+      POSTGRES_USER: listing_service
+      POSTGRES_PASSWORD: listing_service
+    volumes:
+      - listing-db-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U listing_service -d listings"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
   gateway:
     build:
       context: .
@@ -66,9 +82,11 @@ services:
     environment:
       USER_SERVICE_URL: http://user-service:8081
       AUTH_SERVICE_URL: http://auth-service:8082
+      LISTING_SERVICE_URL: http://listing-service:8083
     depends_on:
       - user-service
       - auth-service
+      - listing-service
 
   user-service:
     build:
@@ -103,7 +121,21 @@ services:
         condition: service_healthy
       auth-db:
         condition: service_healthy
+  listing-service:
+    build:
+      context: .
+      args:
+        SERVICE: listing-service
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://listing-db:5432/listings
+      SPRING_DATASOURCE_USERNAME: listing_service
+      SPRING_DATASOURCE_PASSWORD: listing_service
+      JWK_SET_URI: http://auth-service:8082/.well-known/jwks.json
+    depends_on:
+      listing-db:
+        condition: service_healthy
 
 volumes:
   user-db-data:
   auth-db-data:
+  listing-db-data:

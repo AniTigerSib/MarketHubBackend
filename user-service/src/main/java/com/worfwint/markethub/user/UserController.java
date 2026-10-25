@@ -34,6 +34,14 @@ public class UserController {
 			.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found: " + username));
 	}
 
+	/** Public profile by user id, e.g. a listing's seller (listings store the seller's id). */
+	@GetMapping("/users/id/{id}")
+	public PublicProfile getUserById(@PathVariable UUID id) {
+		return userRepository.findById(id)
+			.map(PublicProfile::of)
+			.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found: " + id));
+	}
+
 	/** The caller's full profile. The token's subject is the user id. */
 	@GetMapping("/users/me")
 	public UserProfile getMe(@AuthenticationPrincipal Jwt jwt) {
