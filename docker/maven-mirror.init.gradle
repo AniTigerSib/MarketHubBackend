@@ -1,0 +1,18 @@
+// Used only by Docker image builds (see Dockerfile).
+// Resolves from Google's Maven Central mirror first. On some networks repo.maven.apache.org
+// randomly answers 403, and Gradle doesn't retry 403s, so one bad request fails the build.
+// Maven Central itself stays as the fallback, declared by the build scripts.
+def mirror = 'https://maven-central.storage-download.googleapis.com/maven2/'
+
+beforeSettings { settings ->
+	settings.pluginManagement.repositories {
+		maven { url = mirror }
+		gradlePluginPortal()
+	}
+}
+
+allprojects {
+	repositories {
+		maven { url = mirror }
+	}
+}
