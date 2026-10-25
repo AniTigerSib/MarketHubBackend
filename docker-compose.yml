@@ -22,6 +22,40 @@ services:
       timeout: 10s
       retries: 20
 
+  # One database per service; neither service can read the other's tables
+  user-db:
+    image: postgres:18.1
+    ports:
+      # For services started outside Docker (e.g. from the IDE)
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: users
+      POSTGRES_USER: user_service
+      POSTGRES_PASSWORD: user_service
+    volumes:
+      - user-db-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user_service -d users"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  auth-db:
+    image: postgres:18.1
+    ports:
+      - "5434:5432"
+    environment:
+      POSTGRES_DB: auth
+      POSTGRES_USER: auth_service
+      POSTGRES_PASSWORD: auth_service
+    volumes:
+      - auth-db-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U auth_service -d auth"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
   gateway:
     build:
       context: .
@@ -43,8 +77,15 @@ services:
         SERVICE: user-service
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      SPRING_DATASOURCE_URL: jdbc:postgresql://user-db:5432/users
+      SPRING_DATASOURCE_USERNAME: user_service
+      SPRING_DATASOURCE_PASSWORD: user_service
+      # Public keys for verifying access tokens; fetched lazily, so auth-service may start later
+      JWK_SET_URI: http://auth-service:8082/.well-known/jwks.json
     depends_on:
       kafka:
+        condition: service_healthy
+      user-db:
         condition: service_healthy
 
   auth-service:
@@ -54,6 +95,15 @@ services:
         SERVICE: auth-service
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      SPRING_DATASOURCE_URL: jdbc:postgresql://auth-db:5432/auth
+      SPRING_DATASOURCE_USERNAME: auth_service
+      SPRING_DATASOURCE_PASSWORD: auth_service
     depends_on:
       kafka:
         condition: service_healthy
+      auth-db:
+        condition: service_healthy
+
+volumes:
+  user-db-data:
+  auth-db-data:

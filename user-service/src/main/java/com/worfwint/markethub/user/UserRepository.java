@@ -1,36 +1,78 @@
 package com.worfwint.markethub.user;
 
-import java.time.Instant;
-import java.util.Collection;
-import java.util.Map;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.UUID;
 
-import org.springframework.stereotype.Component;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.stereotype.Repository;
 
-/** In-memory stand-in for a real user database. */
-@Component
+@Repository
 public class UserRepository {
 
-	private final Map<String, User> users = new ConcurrentHashMap<>(Map.of(
-			"michael", new User("michael", "Michael", "michael@markethub.local", null),
-			"alice", new User("alice", "Alice Smith", "alice@markethub.local", null)));
+	private static final String COLUMNS = "id, username, email, display_name, avatar_url, phone";
 
-	public Optional<User> findByUsername(String username) {
-		return Optional.ofNullable(users.get(username));
+	private final JdbcClient jdbc;
+
+	public UserRepository(JdbcClient jdbc) {
+		this.jdbc = jdbc;
 	}
 
-	public Collection<User> findAll() {
-		return users.values();
+	public Optional<UserProfile> findById(UUID id) {
+		return jdbc.sql("SELECT " + COLUMNS + " FROM users WHERE id = :id")
+			.param("id", id)
+			.query(UserRepository::mapProfile)
+			.optional();
 	}
 
-	/** Returns false if a user with this username already exists. */
-	public boolean create(User user) {
-		return users.putIfAbsent(user.username(), user) == null;
+	public Optional<UserProfile> findByUsername(String username) {
+		return jdbc.sql("SELECT " + COLUMNS + " FROM users WHERE lower(username) = lower(:username)")
+			.param("username", username)
+			.query(UserRepository::mapProfile)
+			.optional();
 	}
 
-	public void recordLogin(String username, Instant loggedInAt) {
-		users.computeIfPresent(username, (name, user) -> user.withLastLoginAt(loggedInAt));
+	/**
+	 * Creates the profile, or refreshes its identity fields if it exists. Safe to repeat,
+	 * since Kafka may deliver the same event more than once. Profile fields the user
+	 * edited here are left alone.
+	 */
+	public void upsertIdentity(UUID id, String username, String email, String displayName) {
+		jdbc.sql("""
+				INSERT INTO users (id, username, email, display_name)
+				VALUES (:id, :username, :email, :displayName)
+				ON CONFLICT (id) DO UPDATE
+				SET username = EXCLUDED.username,
+				    email = EXCLUDED.email,
+				    updated_at = now()
+				WHERE users.username IS DISTINCT FROM EXCLUDED.username
+				   OR users.email IS DISTINCT FROM EXCLUDED.email
+				""")
+			.param("id", id)
+			.param("username", username)
+			.param("email", email)
+			.param("displayName", displayName)
+			.update();
+	}
+
+	public Optional<UserProfile> updateProfile(UUID id, String displayName, String avatarUrl, String phone) {
+		return jdbc.sql("""
+				UPDATE users
+				SET display_name = :displayName, avatar_url = :avatarUrl, phone = :phone, updated_at = now()
+				WHERE id = :id
+				RETURNING\s""" + COLUMNS)
+			.param("id", id)
+			.param("displayName", displayName)
+			.param("avatarUrl", avatarUrl)
+			.param("phone", phone)
+			.query(UserRepository::mapProfile)
+			.optional();
+	}
+
+	private static UserProfile mapProfile(ResultSet rs, int rowNum) throws SQLException {
+		return new UserProfile(rs.getObject("id", UUID.class), rs.getString("username"), rs.getString("email"),
+				rs.getString("display_name"), rs.getString("avatar_url"), rs.getString("phone"));
 	}
 
 }

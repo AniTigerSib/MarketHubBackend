@@ -14,7 +14,7 @@ public class KafkaTopics {
 
 	// Both services declare both topics with the same settings, so either one can start first
 
-	/** Compacted: Kafka keeps the latest event per username, so consumers can rebuild the full user list. */
+	/** Compacted: Kafka keeps the latest event per user id, so a new consumer can rebuild the full user list. */
 	@Bean
 	NewTopic userRegisteredTopic() {
 		return TopicBuilder.name(USER_REGISTERED).partitions(3).replicas(1).compact().build();

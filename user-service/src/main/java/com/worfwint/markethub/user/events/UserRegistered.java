@@ -1,5 +1,7 @@
 package com.worfwint.markethub.user.events;
 
-/** Published to {@link KafkaTopics#USER_REGISTERED}, keyed by username. */
-public record UserRegistered(String username, String fullName, String email) {
+import java.util.UUID;
+
+/** Consumed from {@link KafkaTopics#USER_REGISTERED}; published by auth-service. */
+public record UserRegistered(UUID userId, String username, String email, String displayName) {
 }
