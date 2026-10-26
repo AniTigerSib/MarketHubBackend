@@ -8,14 +8,18 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.server.ResponseStatusException;
@@ -23,6 +27,7 @@ import org.springframework.web.server.ResponseStatusException;
 import com.worfwint.markethub.auth.AuthDtos.RegisterRequest;
 import com.worfwint.markethub.auth.AuthDtos.TokenResponse;
 import com.worfwint.markethub.auth.account.Account;
+import com.worfwint.markethub.auth.revocation.AccessTokenVerifier;
 
 @WebMvcTest(AuthController.class)
 class AuthControllerTests {
@@ -33,11 +38,14 @@ class AuthControllerTests {
 	@MockitoBean
 	private AuthService authService;
 
+	@MockitoBean
+	private AccessTokenVerifier accessTokens;
+
 	@Test
 	void registersAccount() throws Exception {
 		UUID id = UUID.randomUUID();
 		given(authService.register(any()))
-			.willReturn(new Account(id, "alice", "alice@markethub.local", "hash", true, List.of("USER")));
+			.willReturn(new Account(id, "alice", "alice@markethub.local", "hash", true, List.of("USER"), 0));
 
 		mockMvc.perform(post("/auth/register").contentType(MediaType.APPLICATION_JSON)
 				.content("""
@@ -84,6 +92,31 @@ class AuthControllerTests {
 		mockMvc.perform(post("/auth/login").contentType(MediaType.APPLICATION_JSON)
 				.content("{\"login\": \"alice\", \"password\": \"wrong-pass\"}"))
 			.andExpect(status().isUnauthorized());
+	}
+
+	@Test
+	void logoutPassesTheVerifiedAccessTokenOn() throws Exception {
+		Jwt jwt = Jwt.withTokenValue("access").header("alg", "RS256").subject(UUID.randomUUID().toString())
+			.jti("jti-1").expiresAt(Instant.now().plusSeconds(600)).build();
+		given(accessTokens.verify("Bearer access")).willReturn(Optional.of(jwt));
+
+		mockMvc.perform(post("/auth/logout").header(HttpHeaders.AUTHORIZATION, "Bearer access")
+				.contentType(MediaType.APPLICATION_JSON).content("{\"refreshToken\": \"refresh\"}"))
+			.andExpect(status().isNoContent());
+
+		verify(authService).logout("refresh", Optional.of(jwt));
+	}
+
+	@Test
+	void logoutAllNeedsValidAccessToken() throws Exception {
+		given(accessTokens.verify(any())).willReturn(Optional.empty());
+
+		mockMvc.perform(post("/auth/logout-all").header(HttpHeaders.AUTHORIZATION, "Bearer forged"))
+			.andExpect(status().isUnauthorized());
+		mockMvc.perform(post("/auth/logout-all"))
+			.andExpect(status().isUnauthorized());
+
+		verify(authService, never()).logoutAll(any());
 	}
 
 }

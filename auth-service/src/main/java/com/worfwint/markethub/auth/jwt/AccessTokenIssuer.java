@@ -19,6 +19,9 @@ import com.worfwint.markethub.auth.account.Account;
 @Component
 public class AccessTokenIssuer {
 
+	/** The account's token version at issue time; see {@link Account#tokenVersion()}. */
+	public static final String TOKEN_VERSION_CLAIM = "tv";
+
 	private final JwtEncoder encoder;
 
 	private final String keyId;
@@ -41,6 +44,7 @@ public class AccessTokenIssuer {
 			.claim("username", account.username())
 			.claim("email", account.email())
 			.claim("roles", account.roles())
+			.claim(TOKEN_VERSION_CLAIM, account.tokenVersion())
 			.build();
 		// The "kid" header tells verifiers which published key to check the signature with
 		JwsHeader header = JwsHeader.with(SignatureAlgorithm.RS256).keyId(keyId).build();

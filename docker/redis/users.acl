@@ -1,0 +1,3 @@
+user default off
+user auth-service on >auth_service ~revoked:jti:* ~tv:* -@all +@connection +get +set +eval +evalsha
+user gateway on >gateway %R~revoked:jti:* %R~tv:* ~rl:* -@all +@connection +mget +eval +evalsha +time +hmget +hset +pexpire

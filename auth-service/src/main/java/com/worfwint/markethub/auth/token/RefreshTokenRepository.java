@@ -30,6 +30,14 @@ public class RefreshTokenRepository {
 			.update();
 	}
 
+	/** The owner of a token, without locking; the owner never changes. */
+	public Optional<UUID> findAccountIdByHash(byte[] tokenHash) {
+		return jdbc.sql("SELECT account_id FROM refresh_tokens WHERE token_hash = :tokenHash")
+			.param("tokenHash", tokenHash)
+			.query(UUID.class)
+			.optional();
+	}
+
 	/** Locks the row until the transaction ends, so a token can't be rotated twice in parallel. */
 	public Optional<RefreshToken> findByHashForUpdate(byte[] tokenHash) {
 		return jdbc.sql("""

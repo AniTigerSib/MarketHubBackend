@@ -17,7 +17,7 @@ public class AccountRepository {
 
 	// Roles are folded into one array column so an account loads in a single query
 	private static final String SELECT_ACCOUNT = """
-			SELECT a.id, a.username, a.email, a.password_hash, a.enabled,
+			SELECT a.id, a.username, a.email, a.password_hash, a.enabled, a.token_version,
 			       COALESCE(array_agg(r.role ORDER BY r.role) FILTER (WHERE r.role IS NOT NULL), '{}') AS roles
 			FROM accounts a
 			LEFT JOIN account_roles r ON r.account_id = a.id
@@ -43,6 +43,33 @@ public class AccountRepository {
 			.param("id", id)
 			.query(AccountRepository::mapAccount)
 			.optional();
+	}
+
+	/**
+	 * Locks the account row until the transaction ends. Session-changing operations (refresh,
+	 * revoking all sessions) take this lock first, so they run one after another per account.
+	 *
+	 * @return false if the account doesn't exist
+	 */
+	public boolean lockForUpdate(UUID id) {
+		// NO KEY UPDATE: doesn't block inserting rows that reference the account
+		return jdbc.sql("SELECT id FROM accounts WHERE id = :id FOR NO KEY UPDATE")
+			.param("id", id)
+			.query(UUID.class)
+			.optional()
+			.isPresent();
+	}
+
+	/** Increases the token version (locking the row) and returns the new value. */
+	public int incrementTokenVersion(UUID id) {
+		return jdbc.sql("""
+				UPDATE accounts SET token_version = token_version + 1, updated_at = now()
+				WHERE id = :id
+				RETURNING token_version
+				""")
+			.param("id", id)
+			.query(Integer.class)
+			.single();
 	}
 
 	public boolean existsByUsername(String username) {
@@ -89,7 +116,7 @@ public class AccountRepository {
 	private static Account mapAccount(ResultSet rs, int rowNum) throws SQLException {
 		String[] roles = (String[]) rs.getArray("roles").getArray();
 		return new Account(rs.getObject("id", UUID.class), rs.getString("username"), rs.getString("email"),
-				rs.getString("password_hash"), rs.getBoolean("enabled"), List.of(roles));
+				rs.getString("password_hash"), rs.getBoolean("enabled"), List.of(roles), rs.getInt("token_version"));
 	}
 
 }
