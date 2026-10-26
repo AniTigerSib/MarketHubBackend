@@ -4,6 +4,12 @@ ext {
 
 dependencies {
 	implementation 'org.springframework.cloud:spring-cloud-starter-gateway-server-webmvc'
+	// Access-token blacklist and shared rate-limit counters
+	implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+
+	testImplementation 'org.springframework.boot:spring-boot-starter-data-redis-test'
+	testImplementation 'org.springframework.boot:spring-boot-testcontainers'
+	testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
 }
 
 dependencyManagement {

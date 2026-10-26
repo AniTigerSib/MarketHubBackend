@@ -5,17 +5,22 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import static com.worfwint.markethub.gateway.TestTokens.bearer;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.HttpHeaders;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
- * Full gateway context, no services running. A rule on an unrouted path lets us check the
- * rate limiter's wiring without proxying anywhere.
+ * Full gateway context, no services and <b>no Redis</b> (the port is closed): CORS, the
+ * in-memory rate-limit fallback, and the blacklist check letting tokens through. A rule on an
+ * unrouted path lets us check the rate limiter without proxying anywhere.
  */
 @SpringBootTest(properties = {
+		"spring.data.redis.port=1",
 		"markethub.cors.allowed-origins=http://ui.test",
 		"markethub.rate-limit.rules[0].name=probe",
 		"markethub.rate-limit.rules[0].method=GET",
@@ -59,4 +64,12 @@ class GatewayFiltersTests {
 				.andExpect(header().string("Access-Control-Allow-Origin", "http://ui.test"))
 				.andExpect(header().string("Access-Control-Expose-Headers", org.hamcrest.Matchers.containsString("Retry-After")));
 	}
+
+	@Test
+	void letsTokensThroughWhenRedisIsDown() throws Exception {
+		// No route for /listings-probe: 404 means the gateway let the request through
+		mvc.perform(get("/listings-probe").header(HttpHeaders.AUTHORIZATION, bearer("{\"jti\":\"j\",\"sub\":\"u\",\"tv\":0}")))
+			.andExpect(status().isNotFound());
+	}
+
 }

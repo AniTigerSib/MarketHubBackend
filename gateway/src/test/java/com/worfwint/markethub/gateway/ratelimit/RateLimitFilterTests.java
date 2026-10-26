@@ -15,7 +15,7 @@ class RateLimitFilterTests {
 	private final RateLimitFilter filter = new RateLimitFilter(
 			new RateLimitProperties(true, List.of(
 					new RateLimitProperties.Rule("login", "post", "/auth/login", 2, Duration.ofMinutes(1)))),
-			new RateLimiter());
+			new InMemoryRateLimiter());
 
 	@Test
 	void rejectsThirdLoginFromSameIpWith429() throws Exception {

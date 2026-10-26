@@ -7,10 +7,10 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import org.junit.jupiter.api.Test;
 
-class RateLimiterTests {
+class InMemoryRateLimiterTests {
 
 	private final AtomicLong now = new AtomicLong(1_000_000_000L);
-	private final RateLimiter limiter = new RateLimiter(now::get);
+	private final InMemoryRateLimiter limiter = new InMemoryRateLimiter(now::get);
 
 	@Test
 	void allowsCapacityThenRejectsWithRetryAfter() {

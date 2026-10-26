@@ -19,6 +19,20 @@ spring:
               predicates:
                 - Path=/listings/**,/categories/**,/cities/**,/favorites/**
 
+  data:
+    redis:
+      # Docker sets host, username and password (docker/redis/users.acl)
+      host: localhost
+      port: 6379
+      username: gateway
+      password: gateway
+      # Short: every request with a token waits for Redis. On failure the gateway skips
+      # Redis for 5 s and lets tokens through unchecked (see docs/ARCHITECTURE.md, gateway).
+      timeout: 200ms
+      connect-timeout: 200ms
+      repositories:
+        enabled: false
+
 server:
   port: 8080
 

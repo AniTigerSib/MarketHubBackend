@@ -8,9 +8,10 @@ import java.util.function.LongSupplier;
 
 /**
  * In-memory token buckets, one per (rule, client) key. Each gateway instance counts on its
- * own, so with several instances a client gets the limit once per instance.
+ * own, so with several instances a client gets the limit once per instance. Used when Redis
+ * is unavailable.
  */
-public class RateLimiter {
+public class InMemoryRateLimiter implements RateLimiter {
 
 	private static final long SWEEP_INTERVAL_NANOS = Duration.ofMinutes(1).toNanos();
 
@@ -18,20 +19,16 @@ public class RateLimiter {
 	private final LongSupplier nanoClock;
 	private final AtomicLong nextSweep;
 
-	public RateLimiter() {
+	public InMemoryRateLimiter() {
 		this(System::nanoTime);
 	}
 
-	RateLimiter(LongSupplier nanoClock) {
+	InMemoryRateLimiter(LongSupplier nanoClock) {
 		this.nanoClock = nanoClock;
 		this.nextSweep = new AtomicLong(nanoClock.getAsLong() + SWEEP_INTERVAL_NANOS);
 	}
 
-	/**
-	 * Takes one request from the key's allowance.
-	 *
-	 * @return {@link Decision#allowed()} or, when the allowance is used up, how long to wait
-	 */
+	@Override
 	public Decision tryConsume(String key, int capacity, Duration window) {
 		long now = nanoClock.getAsLong();
 		sweepIfDue(now);
@@ -50,11 +47,6 @@ public class RateLimiter {
 			return;
 		}
 		buckets.values().removeIf(bucket -> bucket.isFull(now));
-	}
-
-	public record Decision(boolean allowed, Duration retryAfter) {
-
-		static final Decision ALLOWED = new Decision(true, Duration.ZERO);
 	}
 
 	private static final class Bucket {
