@@ -41,7 +41,7 @@ listing-service doesn't use Kafka; it only needs a user's id, which comes from t
 
 | Component | Port (host) | Role | Owns |
 |---|---|---|---|
-| **gateway** | 8080 | Single public entry point; routes by URL path | nothing |
+| **gateway** | 8080 | Single public entry point; routes by URL path, CORS, rate limits on auth endpoints | nothing |
 | **auth-service** | internal 8082 | Registration, login, tokens, signing keys | `auth-db`: accounts, roles, refresh tokens, signing keys |
 | **user-service** | internal 8081 | User profiles | `user-db`: profiles |
 | **listing-service** | internal 8083 | Listings, catalog, search, favorites | `listing-db`: categories, subcategories, cities, listings, favorites |
@@ -73,9 +73,43 @@ to reach them.
 | `/users/**` | `USER_SERVICE_URL` (default `http://localhost:8081`) |
 | `/listings/**`, `/categories/**`, `/cities/**`, `/favorites/**` | `LISTING_SERVICE_URL` (default `http://localhost:8083`) |
 
-The gateway is a plain router. It doesn't check tokens, rate-limit, or change requests;
-each service enforces its own security. `/.well-known/jwks.json` isn't routed, so the JWKS
-is only reachable inside the Docker network.
+The gateway doesn't check tokens or change requests; each service verifies tokens itself.
+`/.well-known/jwks.json` isn't routed, so the JWKS is only reachable inside the Docker network.
+
+It does two things before routing, as servlet filters (`gateway/.../cors`, `gateway/.../ratelimit`):
+
+**CORS.** Handled only here; the services have no CORS config. Allowed origins come from
+`CORS_ALLOWED_ORIGINS` (default `http://localhost:5173,http://localhost:4173`, the Vite dev and
+preview servers). Preflight `OPTIONS` requests are answered by the gateway and never forwarded;
+unknown origins get `403`. Allowed headers: `Authorization`, `Content-Type`; exposed headers:
+`Location`, `Retry-After`. No cookies (`allowCredentials=false`): tokens travel in the
+`Authorization` header. Preflight answers are cached by the browser for 1 hour.
+
+**Rate limiting.** Per client IP, in memory (token bucket: the allowance refills gradually
+over the window):
+
+| Rule | Request | Limit |
+|---|---|---|
+| `login` | `POST /auth/login` | 10 per minute |
+| `register` | `POST /auth/register` | 5 per 15 minutes |
+| `refresh` | `POST /auth/refresh` | 30 per minute |
+
+Over the limit the gateway answers without forwarding:
+
+```
+429 Too Many Requests
+Retry-After: <seconds>
+{"status":429,"error":"Too Many Requests","message":"Too many requests. Try again in <n> seconds."}
+```
+
+- The CORS filter runs first, so a browser can read the `429` and its `Retry-After`.
+- Paths are matched after the servlet container normalizes them, so `//auth/login` or
+  `/auth/%6Cogin` count against the `login` rule.
+- The client IP is `request.getRemoteAddr()`. Behind a reverse proxy or load balancer, set
+  `SERVER_FORWARD_HEADERS_STRATEGY=native` so the address comes from `X-Forwarded-For`;
+  otherwise every client shares the proxy's address and limit.
+- Rules live in `markethub.rate-limit.rules` in `application.yml`; `RATE_LIMIT_ENABLED=false`
+  turns limiting off.
 
 ---
 
@@ -462,6 +496,10 @@ start from the earliest offset.
 | user-, listing-service | `markethub.security.issuer` | `markethub-auth` | |
 | auth-, user-service | `spring.kafka.bootstrap-servers` / `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | `kafka:19092` |
 | gateway | `USER_SERVICE_URL`, `AUTH_SERVICE_URL`, `LISTING_SERVICE_URL` | `http://localhost:8081` / `:8082` / `:8083` | service names |
+| gateway | `markethub.cors.allowed-origins` / `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://localhost:4173` | same |
+| gateway | `markethub.rate-limit.enabled` / `RATE_LIMIT_ENABLED` | `true` | |
+| gateway | `markethub.rate-limit.rules` | login / register / refresh (see §2) | |
+| gateway | `server.forward-headers-strategy` / `SERVER_FORWARD_HEADERS_STRATEGY` | none | set to `native` behind a reverse proxy |
 
 Database credentials are development values set in `docker-compose.yml`
 (`user_service`, `auth_service`, `listing_service`, each with the same password).
@@ -507,7 +545,7 @@ docker compose down -v           # stop and wipe all databases
 ./gradlew test                   # all tests; DB tests need Docker
 ```
 
-### Tests (33)
+### Tests (44)
 
 | Test | Kind | Covers |
 |---|---|---|
@@ -516,6 +554,9 @@ docker compose down -v           # stop and wipe all databases
 | `UserControllerTests` | Web slice + security config | public vs `/me` access, lookup by id, token required, validation |
 | `UserRepositoryTests` | JDBC slice + Postgres (Testcontainers) | migrations, upsert is safe to repeat and keeps edited fields, lookup ignoring case, DB phone constraint |
 | `ListingControllerTests` | Web slice + security config | public search, which endpoints need a token, listing and search validation |
+| `RateLimiterTests` | Unit, fake clock | allowance, gradual refill, `Retry-After`, separate keys, idle clients forgotten |
+| `RateLimitFilterTests` | Filter unit | `429` body and headers, per-IP counting, method and path matching |
+| `GatewayFiltersTests` | Full gateway context, no services | CORS preflight allowed / refused, `429` carries CORS headers |
 | `ListingFlowIntegrationTests` | Full app + Postgres (Testcontainers) | create → edit (seller only) → archive → hidden from others; catalog id checks; every search filter, prefix search in English and Russian, all sorts, pagination; category counts; favorites and the per-user `favorite` flag |
 
 The Testcontainers tests are skipped automatically when Docker isn't available.
@@ -533,7 +574,7 @@ The Testcontainers tests are skipped automatically when Docker isn't available.
 | Listings | No moderation: listings go live immediately, with no draft, in-review or rejected states. | Moderation flow + `MODERATOR` role |
 | Listings | Photos are URLs supplied by the client; nothing is uploaded, stored or checked. | Upload endpoint + object storage (S3/MinIO) |
 | Listings | No view counts; seller name needs a separate call to user-service. | View counter; or copy seller names into listing-service from events |
-| Gateway | Doesn't validate tokens or rate-limit; each service must protect itself. | Token check / rate limiting at the gateway |
+| Gateway | Rate-limit counters are in memory per gateway instance: they reset on restart, and with several instances a client gets the limit once per instance. Only auth endpoints are limited. | Shared store (Redis) for counters; wider limits if needed |
 | Identity changes | No endpoints to change username, email or password, so nothing publishes identity updates yet (user-service's upsert already handles them). | Add endpoints + `user.updated` event |
 | Roles | `ADMIN` exists, but nothing assigns it and no endpoint requires it. | Admin tooling |
 | Contracts | Event records are copied in each service and can drift apart without anyone noticing. | Shared contract module or schema registry |

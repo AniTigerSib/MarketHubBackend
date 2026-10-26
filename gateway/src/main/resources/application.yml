@@ -21,3 +21,28 @@ spring:
 
 server:
   port: 8080
+
+markethub:
+  cors:
+    # Comma-separated exact origins of the web UI (Vite dev server and `vite preview` by default).
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:4173}
+    max-age: 1h
+  rate-limit:
+    enabled: ${RATE_LIMIT_ENABLED:true}
+    # Per client IP. Allowance refills gradually over the window.
+    rules:
+      - name: login
+        method: POST
+        path: /auth/login
+        capacity: 10
+        window: 1m
+      - name: register
+        method: POST
+        path: /auth/register
+        capacity: 5
+        window: 15m
+      - name: refresh
+        method: POST
+        path: /auth/refresh
+        capacity: 30
+        window: 1m
