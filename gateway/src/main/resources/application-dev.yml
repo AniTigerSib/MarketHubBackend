@@ -1,0 +1,14 @@
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
+    path: /swagger-ui.html
+    disable-swagger-default-url: true
+    urls:
+      - name: Auth
+        url: /openapi/auth
+      - name: Users
+        url: /openapi/users
+      - name: Listings
+        url: /openapi/listings

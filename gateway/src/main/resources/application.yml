@@ -60,3 +60,10 @@ markethub:
         path: /auth/refresh
         capacity: 30
         window: 1m
+
+# Enabled only by application-dev.yml.
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false

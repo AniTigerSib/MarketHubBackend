@@ -39,6 +39,7 @@ import com.worfwint.markethub.auth.events.AccountEventPublisher;
 
 /** Full HTTP flow against real Postgres (Flyway migrations) and Redis. Skipped without Docker. */
 @SpringBootTest(properties = "spring.kafka.admin.auto-create=false")
+@org.springframework.test.context.ActiveProfiles("dev")
 @AutoConfigureMockMvc
 @Testcontainers(disabledWithoutDocker = true)
 class AuthFlowIntegrationTests {
@@ -59,6 +60,17 @@ class AuthFlowIntegrationTests {
 
 	@MockitoBean
 	private AccountEventPublisher events;
+
+	@Test
+	void developmentDocumentIsPublicAndDescribesAuthentication() throws Exception {
+		mockMvc.perform(get("/v3/api-docs"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.servers[0].url").value("/"))
+			.andExpect(jsonPath("$.components.securitySchemes.bearerAuth.scheme").value("bearer"))
+			.andExpect(jsonPath("$.paths['/auth/login'].post.security").doesNotExist())
+			.andExpect(jsonPath("$.paths['/auth/logout-all'].post.security[0].bearerAuth").isArray())
+			.andExpect(jsonPath("$.paths['/.well-known/jwks.json']").doesNotExist());
+	}
 
 	@Test
 	void logsInWithUsernameOrEmailAndTokenVerifiesAgainstPublishedKey() throws Exception {

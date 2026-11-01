@@ -1,0 +1,15 @@
+# Opt-in documentation for the complete development landscape.
+# docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+services:
+  gateway:
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+  auth-service:
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+  user-service:
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+  listing-service:
+    environment:
+      SPRING_PROFILES_ACTIVE: dev

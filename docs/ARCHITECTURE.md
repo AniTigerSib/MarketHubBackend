@@ -633,10 +633,11 @@ docker compose down -v           # stop and wipe all databases
 ./gradlew test                   # all tests; DB tests need Docker
 ```
 
-### Tests (65)
+### Tests
 
 | Test | Kind | Covers |
 |---|---|---|
+| `OpenApiDevelopmentTests` (gateway, user-service) | Full contexts with stub services / mocked repository | Dev Swagger UI, definition proxy routes, public documents and auth requirements; gateway filter tests check docs are disabled by default |
 | `AuthControllerTests` | Web slice, mocked service | request validation, status codes, JSON shape; logout passes the verified token on; `logout-all` needs a valid token |
 | `AuthFlowIntegrationTests` | Full app + Postgres and Redis (Testcontainers) | register → login by username/email → token verified with the **public JWKS key only** → refresh rotation → reuse detection → logout; duplicate checks ignoring case; logout blacklists the `jti` with the right expiry; `logout-all` ends every session, new logins get the new `tv`, a revoked token can't call it again; reuse detection raises `tv` |
 | `AuthServiceRevocationTests` | Unit, mocks | Redis down: refresh tokens revoked first, then `503` |
@@ -672,3 +673,14 @@ The Testcontainers tests are skipped automatically when Docker isn't available.
 | Contracts | Event records are copied in each service and can drift apart without anyone noticing. | Shared contract module or schema registry |
 | Infra | Single Kafka broker, replication factor 1, development DB passwords in compose. | Production config / secrets management |
 | Health | No actuator health endpoints; the gateway waits for services to start, not to be ready. | `spring-boot-starter-actuator` + compose healthchecks |
+
+## Development OpenAPI documentation
+
+See [OPENAPI.md](OPENAPI.md) for the opt-in `dev` landscape, gateway Swagger UI,
+service definitions, and authenticated requests. Start it with:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+```
+
+Swagger UI: http://localhost:8080/swagger-ui.html. Documentation is disabled without the `dev` profile.

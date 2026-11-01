@@ -35,6 +35,13 @@ class GatewayFiltersTests {
 	private MockMvc mvc;
 
 	@Test
+	void documentationIsDisabledByDefault() throws Exception {
+		mvc.perform(get("/v3/api-docs")).andExpect(status().isNotFound());
+		mvc.perform(get("/swagger-ui.html")).andExpect(status().isNotFound());
+		mvc.perform(get("/openapi/auth")).andExpect(status().isNotFound());
+	}
+
+	@Test
 	void answersPreflightForAllowedOrigin() throws Exception {
 		mvc.perform(options("/listings")
 						.header("Origin", "http://ui.test")

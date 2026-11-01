@@ -32,6 +32,7 @@ import com.jayway.jsonpath.JsonPath;
  * searches by it.
  */
 @SpringBootTest
+@org.springframework.test.context.ActiveProfiles("dev")
 @AutoConfigureMockMvc
 @Testcontainers(disabledWithoutDocker = true)
 class ListingFlowIntegrationTests {
@@ -46,6 +47,18 @@ class ListingFlowIntegrationTests {
 	private final UUID seller = UUID.randomUUID();
 
 	private final UUID buyer = UUID.randomUUID();
+
+	@Test
+	void developmentDocumentIsPublicAndDescribesAuthentication() throws Exception {
+		mockMvc.perform(get("/v3/api-docs"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.servers[0].url").value("/"))
+			.andExpect(jsonPath("$.components.securitySchemes.bearerAuth.scheme").value("bearer"))
+			.andExpect(jsonPath("$.paths['/listings'].get.security").doesNotExist())
+			.andExpect(jsonPath("$.paths['/listings'].post.security[0].bearerAuth").isArray())
+			.andExpect(jsonPath("$.paths['/listings'].get.parameters[?(@.name == 'q')]").isNotEmpty())
+			.andExpect(jsonPath("$.paths['/favorites'].get.security[0].bearerAuth").isArray());
+	}
 
 	@Test
 	void sellerCreatesEditsAndArchivesListing() throws Exception {

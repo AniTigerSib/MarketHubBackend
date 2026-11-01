@@ -1,5 +1,7 @@
 package com.worfwint.markethub.listing.listing;
 
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+
 import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
@@ -50,23 +52,27 @@ public class ListingController {
 
 	@PostMapping("/listings")
 	@ResponseStatus(HttpStatus.CREATED)
+	@SecurityRequirement(name = "bearerAuth")
 	public ListingView create(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody ListingRequest request) {
 		return listingService.create(userId(jwt), request);
 	}
 
 	@PutMapping("/listings/{id:\\d+}")
+	@SecurityRequirement(name = "bearerAuth")
 	public ListingView update(@PathVariable long id, @AuthenticationPrincipal Jwt jwt,
 			@Valid @RequestBody ListingRequest request) {
 		return listingService.update(id, userId(jwt), request);
 	}
 
 	@PostMapping("/listings/{id:\\d+}/archive")
+	@SecurityRequirement(name = "bearerAuth")
 	public ListingView archive(@PathVariable long id, @AuthenticationPrincipal Jwt jwt) {
 		return listingService.archive(id, userId(jwt));
 	}
 
 	/** The caller's listings for the "My listings" tabs; optional ?status=active|archived. */
 	@GetMapping("/listings/mine")
+	@SecurityRequirement(name = "bearerAuth")
 	public MyListings mine(@AuthenticationPrincipal Jwt jwt,
 			@RequestParam(required = false) @Pattern(regexp = "active|archived") String status) {
 		return listingService.mine(userId(jwt), status);

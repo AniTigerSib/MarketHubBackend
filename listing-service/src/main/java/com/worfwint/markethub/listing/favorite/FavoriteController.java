@@ -1,5 +1,7 @@
 package com.worfwint.markethub.listing.favorite;
 
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+
 import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
@@ -33,6 +35,7 @@ public class FavoriteController {
 	}
 
 	@GetMapping("/favorites")
+	@SecurityRequirement(name = "bearerAuth")
 	public Page<ListingView> list(@AuthenticationPrincipal Jwt jwt,
 			@RequestParam(defaultValue = "0") @Min(0) int page,
 			@RequestParam(defaultValue = "24") @Min(1) @Max(100) int size) {
@@ -42,6 +45,7 @@ public class FavoriteController {
 	/** Idempotent; only active listings can be saved. */
 	@PutMapping("/favorites/{listingId:\\d+}")
 	@ResponseStatus(HttpStatus.NO_CONTENT)
+	@SecurityRequirement(name = "bearerAuth")
 	public void add(@AuthenticationPrincipal Jwt jwt, @PathVariable long listingId) {
 		if (!favorites.add(userId(jwt), listingId)) {
 			throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Listing not found");
@@ -50,6 +54,7 @@ public class FavoriteController {
 
 	@DeleteMapping("/favorites/{listingId:\\d+}")
 	@ResponseStatus(HttpStatus.NO_CONTENT)
+	@SecurityRequirement(name = "bearerAuth")
 	public void remove(@AuthenticationPrincipal Jwt jwt, @PathVariable long listingId) {
 		favorites.remove(userId(jwt), listingId);
 	}

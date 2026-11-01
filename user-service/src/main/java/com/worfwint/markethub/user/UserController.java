@@ -1,5 +1,7 @@
 package com.worfwint.markethub.user;
 
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+
 import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
@@ -44,11 +46,13 @@ public class UserController {
 
 	/** The caller's full profile. The token's subject is the user id. */
 	@GetMapping("/users/me")
+	@SecurityRequirement(name = "bearerAuth")
 	public UserProfile getMe(@AuthenticationPrincipal Jwt jwt) {
 		return userRepository.findById(userId(jwt)).orElseThrow(UserController::profileNotFound);
 	}
 
 	@PutMapping("/users/me")
+	@SecurityRequirement(name = "bearerAuth")
 	public UserProfile updateMe(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody UpdateProfileRequest request) {
 		return userRepository.updateProfile(userId(jwt), request.displayName(), request.avatarUrl(), request.phone())
 			.orElseThrow(UserController::profileNotFound);

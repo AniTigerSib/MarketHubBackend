@@ -1,5 +1,9 @@
 package com.worfwint.markethub.auth;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -56,15 +60,18 @@ public class AuthController {
 	 */
 	@PostMapping("/logout")
 	@ResponseStatus(HttpStatus.NO_CONTENT)
+	@Operation(description = "Revokes the refresh token. Authorize with an access token to revoke it too.",
+		security = { @SecurityRequirement(name = "bearerAuth"), @SecurityRequirement })
 	public void logout(@Valid @RequestBody RefreshRequest request,
-			@RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) String authorization) {
+			@Parameter(hidden = true) @RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) String authorization) {
 		authService.logout(request.refreshToken(), accessTokens.verify(authorization));
 	}
 
 	/** Ends every session of the caller's account, on all devices. Needs a valid access token. */
 	@PostMapping("/logout-all")
 	@ResponseStatus(HttpStatus.NO_CONTENT)
-	public void logoutAll(@RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) String authorization) {
+	@SecurityRequirement(name = "bearerAuth")
+	public void logoutAll(@Parameter(hidden = true) @RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) String authorization) {
 		authService.logoutAll(accessTokens.verify(authorization)
 			.orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Valid access token required")));
 	}

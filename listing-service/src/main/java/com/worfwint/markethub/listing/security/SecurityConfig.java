@@ -28,6 +28,7 @@ public class SecurityConfig {
 		return http
 			.authorizeHttpRequests(auth -> auth
 				.requestMatchers("/error").permitAll()
+				.requestMatchers(HttpMethod.GET, "/v3/api-docs", "/v3/api-docs.yaml", "/v3/api-docs/**").permitAll()
 				.requestMatchers("/listings/mine").authenticated()
 				.requestMatchers(HttpMethod.GET, "/categories", "/cities", "/listings", "/listings/*").permitAll()
 				.anyRequest().authenticated())
