@@ -13,13 +13,16 @@ public class CatalogController {
 
 	private final CatalogRepository catalog;
 
-	public CatalogController(CatalogRepository catalog) {
+	private final CatalogCache cache;
+
+	public CatalogController(CatalogRepository catalog, CatalogCache cache) {
 		this.catalog = catalog;
+		this.cache = cache;
 	}
 
 	@GetMapping("/categories")
 	public List<Category> categories() {
-		return catalog.findCategories();
+		return cache.categories();
 	}
 
 	@GetMapping("/cities")

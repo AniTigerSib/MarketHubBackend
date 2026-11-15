@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
@@ -20,6 +21,8 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
+import org.testcontainers.containers.GenericContainer;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -41,8 +44,15 @@ class ListingFlowIntegrationTests {
 	@ServiceConnection
 	static PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:18.1");
 
+	@Container
+	@ServiceConnection(name = "redis")
+	static GenericContainer<?> redis = new GenericContainer<>("redis:8.2").withExposedPorts(6379);
+
 	@Autowired
 	private MockMvc mockMvc;
+
+	@Autowired
+	private StringRedisTemplate redisTemplate;
 
 	private final UUID seller = UUID.randomUUID();
 
@@ -54,6 +64,7 @@ class ListingFlowIntegrationTests {
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.servers[0].url").value("/"))
 			.andExpect(jsonPath("$.components.securitySchemes.bearerAuth.scheme").value("bearer"))
+			.andExpect(jsonPath("$.components.schemas.Category.properties.icon.example").value("ph ph-car"))
 			.andExpect(jsonPath("$.paths['/listings'].get.security").doesNotExist())
 			.andExpect(jsonPath("$.paths['/listings'].post.security[0].bearerAuth").isArray())
 			.andExpect(jsonPath("$.paths['/listings'].get.parameters[?(@.name == 'q')]").isNotEmpty())
@@ -137,12 +148,41 @@ class ListingFlowIntegrationTests {
 	}
 
 	@Test
-	void categoriesCountActiveListings() throws Exception {
+	void categoriesExposePhosphorIcons() throws Exception {
+		String body = mockMvc.perform(get("/categories"))
+			.andExpect(status().isOk())
+			.andReturn().getResponse().getContentAsString();
+		List<Map<String, Object>> categories = JsonPath.read(body, "$");
+		Map<String, String> expected = Map.of(
+			"transport", "ph ph-car", "realty", "ph ph-buildings",
+			"jobs", "ph ph-briefcase", "services", "ph ph-wrench",
+			"electronics", "ph ph-device-mobile", "home", "ph ph-armchair",
+			"clothing", "ph ph-t-shirt", "kids", "ph ph-baby",
+			"hobbies", "ph ph-bicycle", "pets", "ph ph-paw-print");
+		assertThat(categories).hasSize(expected.size());
+		for (Map<String, Object> category : categories) {
+			assertThat(category.get("icon")).isEqualTo(expected.get(category.get("id")));
+		}
+	}
+
+	@Test
+	void categoriesCacheCountsUntilRedisEntryExpires() throws Exception {
+		redisTemplate.expire("catalog:categories:v1", java.time.Duration.ZERO);
 		String before = mockMvc.perform(get("/categories")).andReturn().getResponse().getContentAsString();
 		List<Number> petsCounts = JsonPath.read(before, "$[?(@.id == 'pets')].count");
 		int petsBefore = petsCounts.getFirst().intValue();
+		assertThat(redisTemplate.getExpire("catalog:categories:v1")).isBetween(1L, 60L);
+		List<Number> suppliesCounts = JsonPath.read(before,
+			"$[?(@.id == 'pets')].subcategories[?(@.id == 'supplies')].count");
+		int suppliesBefore = suppliesCounts.getFirst().intValue();
 
-		create(seller, body(tag() + " Cat tree 150 cm", "pets", "supplies", "spb", 4800, "new", "business", false));
+		long listingId = create(seller, body(tag() + " Cat tree 150 cm", "pets", "supplies", "spb", 4800, "new", "business", false));
+
+		// Cache hits keep the prior counts and do not extend the 60-second lifetime.
+		mockMvc.perform(get("/categories"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$[?(@.id == 'pets')].count").value(petsBefore));
+		redisTemplate.expire("catalog:categories:v1", java.time.Duration.ZERO);
 
 		mockMvc.perform(get("/categories"))
 			.andExpect(status().isOk())
@@ -150,7 +190,15 @@ class ListingFlowIntegrationTests {
 			.andExpect(jsonPath("$[0].id").value("transport"))
 			.andExpect(jsonPath("$[0].name.ru").value("Транспорт"))
 			.andExpect(jsonPath("$[?(@.id == 'pets')].count").value(petsBefore + 1))
-			.andExpect(jsonPath("$[?(@.id == 'pets')].subcategories[?(@.id == 'supplies')].count").value(petsBefore + 1));
+			.andExpect(jsonPath("$[?(@.id == 'pets')].subcategories[?(@.id == 'supplies')].count").value(suppliesBefore + 1));
+		mockMvc.perform(post("/listings/" + listingId + "/archive").with(as(seller)))
+			.andExpect(status().isOk());
+		mockMvc.perform(get("/categories"))
+			.andExpect(jsonPath("$[?(@.id == 'pets')].count").value(petsBefore + 1));
+		redisTemplate.expire("catalog:categories:v1", java.time.Duration.ZERO);
+		mockMvc.perform(get("/categories"))
+			.andExpect(jsonPath("$[?(@.id == 'pets')].count").value(petsBefore))
+			.andExpect(jsonPath("$[?(@.id == 'pets')].subcategories[?(@.id == 'supplies')].count").value(suppliesBefore));
 		mockMvc.perform(get("/cities"))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$[0].name.en").value("Moscow"));

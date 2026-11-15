@@ -25,33 +25,33 @@ public class CatalogRepository {
 	/** All categories with their subcategories, in display order, with active-listing counts. */
 	public List<Category> findCategories() {
 		// One row per subcategory, with its own count and its category's count
-		record Row(String categoryId, String categoryEn, String categoryRu, long categoryCount, String subId,
+		record Row(String categoryId, String categoryEn, String categoryRu, String categoryIcon, long categoryCount, String subId,
 				String subEn, String subRu, long subCount) {
 		}
 		List<Row> rows = jdbc.sql("""
 				WITH counts AS (
-				    SELECT subcategory_id, count(*) AS n
+				    SELECT category_id, subcategory_id, count(*) AS n
 				    FROM listings
 				    WHERE status = 'active'
-				    GROUP BY subcategory_id
+				    GROUP BY category_id, subcategory_id
 				)
-				SELECT c.id AS category_id, c.name_en AS category_en, c.name_ru AS category_ru,
+				SELECT c.id AS category_id, c.name_en AS category_en, c.name_ru AS category_ru, c.icon AS category_icon,
 				       COALESCE(sum(COALESCE(n.n, 0)) OVER (PARTITION BY c.id), 0) AS category_count,
 				       s.id AS sub_id, s.name_en AS sub_en, s.name_ru AS sub_ru, COALESCE(n.n, 0) AS sub_count
 				FROM categories c
 				JOIN subcategories s ON s.category_id = c.id
-				LEFT JOIN counts n ON n.subcategory_id = s.id
+				LEFT JOIN counts n ON n.category_id = c.id AND n.subcategory_id = s.id
 				ORDER BY c.position, s.position
 				""")
 			.query((rs, rowNum) -> new Row(rs.getString("category_id"), rs.getString("category_en"),
-					rs.getString("category_ru"), rs.getLong("category_count"), rs.getString("sub_id"),
+					rs.getString("category_ru"), rs.getString("category_icon"), rs.getLong("category_count"), rs.getString("sub_id"),
 					rs.getString("sub_en"), rs.getString("sub_ru"), rs.getLong("sub_count")))
 			.list();
 
 		Map<String, Category> categories = new LinkedHashMap<>();
 		for (Row row : rows) {
 			Category category = categories.computeIfAbsent(row.categoryId(), id -> new Category(id,
-					new LocalizedName(row.categoryEn(), row.categoryRu()), row.categoryCount(), new ArrayList<>()));
+					new LocalizedName(row.categoryEn(), row.categoryRu()), row.categoryIcon(), row.categoryCount(), new ArrayList<>()));
 			category.subcategories().add(new Subcategory(row.subId(), new LocalizedName(row.subEn(), row.subRu()),
 					row.subCount()));
 		}

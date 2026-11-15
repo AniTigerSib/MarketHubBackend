@@ -40,7 +40,7 @@ tokens themselves.
 Each database is used by one service only. `user.logged-in` has no consumer yet.
 auth-service writes the access-token blacklist to **Redis**; the gateway reads it and keeps its
 rate-limit counters there (§2, §3.8).
-listing-service doesn't use Kafka; it only needs a user's id, which comes from the token.
+listing-service doesn't use Kafka; it gets the user id from the token and caches the category response in Redis.
 
 | Component | Port (host) | Role | Owns |
 |---|---|---|---|
@@ -49,7 +49,7 @@ listing-service doesn't use Kafka; it only needs a user's id, which comes from t
 | **user-service** | internal 8081 | User profiles | `user-db`: profiles |
 | **listing-service** | internal 8083 | Listings, catalog, search, favorites | `listing-db`: categories, subcategories, cities, listings, favorites |
 | **kafka** | 9092 | Event bus between services | topics `user.registered`, `user.logged-in` |
-| **redis** | 6379 | Access-token blacklist (§3.8), gateway rate-limit counters | keys `revoked:jti:*`, `tv:*`, `rl:*` |
+| **redis** | 6379 | Access-token blacklist (§3.8), gateway rate-limit counters, category cache | keys `revoked:jti:*`, `tv:*`, `rl:*`, `catalog:*` |
 | **auth-db** | 5434 | PostgreSQL 18 for auth-service only | |
 | **user-db** | 5433 | PostgreSQL 18 for user-service only | |
 | **listing-db** | 5435 | PostgreSQL 18 for listing-service only | |
@@ -410,7 +410,7 @@ and favorites. Tokens are checked the same way as in user-service (section 4.2).
 
 | Method & path | Auth | Purpose |
 |---|---|---|
-| `GET /categories` | public | All 10 categories with their subcategories, names in English and Russian, and the number of active listings in each |
+| `GET /categories` | public | All 10 categories with their subcategories, names in English and Russian, Phosphor icon CSS classes, and the number of active listings in each |
 | `GET /cities` | public | The 5 cities, names in English and Russian |
 | `GET /listings` | public (token optional) | Search active listings: filters, sort, pagination (5.3) |
 | `GET /listings/{id}` | public (token optional) | One listing. Archived listings are visible only to their seller; others get `404`. |
@@ -470,7 +470,7 @@ V3                               └──< favorites
 
 | Table | Notes |
 |---|---|
-| `categories` | `id` (e.g. `electronics`), `name_en`, `name_ru`, `position`. 10 rows seeded. |
+| `categories` | `id` (e.g. `electronics`), `name_en`, `name_ru`, `icon` (Phosphor CSS classes, e.g. `ph ph-car`), `position`. 10 rows seeded. |
 | `subcategories` | `id` (e.g. `phones`), `category_id`, names, `position`. 32 rows seeded. |
 | `cities` | `id` (e.g. `msk`), names, `position`. 5 rows seeded. |
 | `listings` | `id` BIGINT identity, `seller_id` UUID, category/subcategory/city, `title`, `description`, `price`, `price_unit`, `item_condition`, `seller_type`, `photo_urls` TEXT[], contact flags, `status`, timestamps, `search_vector`. |
@@ -620,7 +620,7 @@ docker-compose.yml      kafka, redis, 3 databases, gateway, 3 services
 `kafka` (health: broker API), `redis` (health: `PING` as `auth-service`) and the three
 databases (health: `pg_isready`) start first. auth-service waits for healthy Kafka, Redis and
 its database; user-service for Kafka and its database; listing-service
-waits for its database. The gateway starts after the services. Flyway migrates each database
+waits for its database and Redis. The gateway starts after the services. Flyway migrates each database
 when its service starts.
 
 ### Commands
@@ -684,3 +684,29 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 ```
 
 Swagger UI: http://localhost:8080/swagger-ui.html. Documentation is disabled without the `dev` profile.
+
+### Category icons
+
+`GET /categories` includes an `icon` string on each top-level category, for example:
+
+```json
+{"id":"transport","name":{"en":"Transport","ru":"Транспорт"},"icon":"ph ph-car","count":0,"subcategories":[]}
+```
+
+The value contains the full Phosphor CSS classes already used by the frontend and can
+be rendered with `<i :class="category.icon"></i>`. The frontend loads Phosphor's icon
+font and chooses the icon size and color. Subcategories keep their existing response shape.
+Listing-service migration `V4__add_category_icons.sql` populates existing categories;
+new categories default to `ph ph-tag` unless an icon is supplied.
+
+### Catalog response cache
+
+`GET /categories` reads the JSON response from Redis key `catalog:categories:v1`.
+On a miss, listing-service queries PostgreSQL for categories, subcategories, icons,
+localized names and active-listing counts, then stores the result with a 60-second TTL.
+Cache hits do not extend the expiry. After expiry, the next request reloads the data;
+there are no background refreshes. Redis failures fall back to the database.
+Concurrent misses are coalesced within an instance; separate instances may both reload.
+
+The listing-service Redis account can only GET/SET `catalog:*` keys. Existing Docker
+installations must restart Redis to load the updated ACL (`docker compose restart redis`).

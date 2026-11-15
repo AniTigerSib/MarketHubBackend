@@ -7,6 +7,7 @@ comments in that file, so they live here. Passwords are development values.
 |---|---|---|---|
 | `default` | | disabled | every client must log in |
 | `auth-service` | `revoked:jti:*`, `tv:*` | `GET`, `SET`, scripts | writes the access-token blacklist |
+| `listing-service` | `catalog:*` | `GET`, `SET` | category response cache with a 60-second TTL |
 | `gateway` | read-only `revoked:jti:*`, `tv:*`; read/write `rl:*` | `MGET`, scripts (`TIME`, `HMGET`, `HSET`, `PEXPIRE`) | checks the blacklist, keeps rate-limit counters |
 
 Keys:
@@ -16,5 +17,7 @@ Keys:
   access-token lifetime, when every older token has expired anyway.
 - `rl:<rule>|<client ip>`: a rate-limit bucket (hash of `tokens`, `ts`). Expires after the
   rule's window, when it would be full again.
+
+- `catalog:categories:v1`: JSON category response including icons, both languages and active-listing counts. Expires 60 seconds after a cache miss populates it; hits do not extend the TTL.
 
 After editing `users.acl`, restart Redis: `docker compose restart redis`.

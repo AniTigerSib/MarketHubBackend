@@ -23,7 +23,7 @@ services:
       retries: 20
 
   # Access-token blacklist (written by auth-service, read by the gateway) and the gateway's
-  # rate-limit counters. Users and permissions: docker/redis/users.acl
+  # rate-limit counters and listing-service's category cache. Users and permissions: docker/redis/users.acl
   redis:
     image: redis:8.2
     command: ["redis-server", "--appendonly", "yes", "--aclfile", "/usr/local/etc/redis/users.acl"]
@@ -157,9 +157,14 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://listing-db:5432/listings
       SPRING_DATASOURCE_USERNAME: listing_service
       SPRING_DATASOURCE_PASSWORD: listing_service
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_USERNAME: listing-service
+      SPRING_DATA_REDIS_PASSWORD: listing_service
       JWK_SET_URI: http://auth-service:8082/.well-known/jwks.json
     depends_on:
       listing-db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
 volumes:
