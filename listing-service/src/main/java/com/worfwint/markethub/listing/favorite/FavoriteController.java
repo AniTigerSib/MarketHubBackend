@@ -7,7 +7,6 @@ import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -17,7 +16,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-import com.worfwint.markethub.listing.listing.ListingDtos.ListingView;
+import com.worfwint.markethub.listing.listing.ListingDtos.FavoriteListingSummary;
 import com.worfwint.markethub.listing.listing.ListingDtos.Page;
 
 import jakarta.validation.constraints.Max;
@@ -25,7 +24,6 @@ import jakarta.validation.constraints.Min;
 
 /** The caller's saved listings. All endpoints need a token. */
 @RestController
-@Validated
 public class FavoriteController {
 
 	private final FavoriteRepository favorites;
@@ -36,7 +34,7 @@ public class FavoriteController {
 
 	@GetMapping("/favorites")
 	@SecurityRequirement(name = "bearerAuth")
-	public Page<ListingView> list(@AuthenticationPrincipal Jwt jwt,
+	public Page<FavoriteListingSummary> list(@AuthenticationPrincipal Jwt jwt,
 			@RequestParam(defaultValue = "0") @Min(0) int page,
 			@RequestParam(defaultValue = "24") @Min(1) @Max(100) int size) {
 		return favorites.findByUser(userId(jwt), page, size);

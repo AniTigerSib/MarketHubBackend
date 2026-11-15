@@ -1,14 +1,13 @@
 package com.worfwint.markethub.listing.favorite;
 
-import java.sql.Types;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
-import com.worfwint.markethub.listing.listing.ListingDtos.ListingView;
-import com.worfwint.markethub.listing.listing.ListingRepository;
+import com.worfwint.markethub.listing.listing.ListingDtos.FavoriteListingSummary;
 import com.worfwint.markethub.listing.listing.ListingDtos.Page;
 
 @Repository
@@ -40,22 +39,26 @@ public class FavoriteRepository {
 	}
 
 	/** The user's saved listings, most recently saved first. Includes listings archived since. */
-	public Page<ListingView> findByUser(UUID userId, int page, int size) {
+	public Page<FavoriteListingSummary> findByUser(UUID userId, int page, int size) {
 		long total = jdbc.sql("SELECT count(*) FROM favorites WHERE user_id = :userId")
 			.param("userId", userId)
 			.query(Long.class)
 			.single();
-		List<ListingView> items = jdbc.sql(ListingRepository.SELECT_LISTING
-				+ """
-						 JOIN favorites mine ON mine.listing_id = l.id AND mine.user_id = :userId
-						 ORDER BY mine.created_at DESC, l.id DESC
-						 LIMIT :limit OFFSET :offset
-						""")
+		List<FavoriteListingSummary> items = jdbc.sql("""
+				SELECT l.id, l.title, l.price, l.price_unit, l.category_id, l.city_id, l.created_at,
+				       l.photo_urls[1] AS cover_photo_url
+				FROM listings l
+				JOIN favorites mine ON mine.listing_id = l.id AND mine.user_id = :userId
+				ORDER BY mine.created_at DESC, l.id DESC
+				LIMIT :limit OFFSET :offset
+				""")
 			.param("userId", userId)
-			.param("viewerId", userId, Types.OTHER)
 			.param("limit", size)
 			.param("offset", (long) page * size)
-			.query(ListingRepository::mapListing)
+			.query((rs, rowNum) -> new FavoriteListingSummary(rs.getLong("id"), rs.getString("title"),
+					rs.getLong("price"), rs.getString("price_unit"), rs.getString("category_id"),
+					rs.getString("city_id"), rs.getObject("created_at", OffsetDateTime.class).toInstant(),
+					rs.getString("cover_photo_url"), true))
 			.list();
 		return new Page<>(items, total, page, size);
 	}

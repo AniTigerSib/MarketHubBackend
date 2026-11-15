@@ -15,6 +15,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
@@ -29,6 +30,7 @@ import com.worfwint.markethub.listing.favorite.FavoriteController;
 import com.worfwint.markethub.listing.favorite.FavoriteRepository;
 import com.worfwint.markethub.listing.listing.ListingController;
 import com.worfwint.markethub.listing.listing.ListingDtos.ListingView;
+import com.worfwint.markethub.listing.listing.ListingDtos.MyListings;
 import com.worfwint.markethub.listing.listing.ListingDtos.Page;
 import com.worfwint.markethub.listing.listing.ListingRepository;
 import com.worfwint.markethub.listing.listing.ListingService;
@@ -121,6 +123,31 @@ class ListingControllerTests {
 		mockMvc.perform(get("/listings/mine")).andExpect(status().isUnauthorized());
 		mockMvc.perform(get("/favorites")).andExpect(status().isUnauthorized());
 		mockMvc.perform(put("/favorites/1")).andExpect(status().isUnauthorized());
+	}
+
+	@Test
+	void ownListingsDefaultPaginationAndValidation() throws Exception {
+		given(listingService.mine(SELLER, null, 0, 24))
+			.willReturn(new MyListings(List.of(), 0, 0, 24, Map.of("active", 0L, "archived", 0L)));
+		mockMvc.perform(get("/listings/mine").with(jwt().jwt(token -> token.subject(SELLER.toString()))))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.page").value(0))
+			.andExpect(jsonPath("$.size").value(24))
+			.andExpect(jsonPath("$.total").value(0))
+			.andExpect(jsonPath("$.counts.active").value(0));
+		for (String[] invalid : new String[][] { { "page", "-1" }, { "size", "0" },
+				{ "size", "101" }, { "status", "draft" } }) {
+			mockMvc.perform(get("/listings/mine").with(jwt()).param(invalid[0], invalid[1]))
+				.andExpect(status().isBadRequest());
+		}
+	}
+
+	@Test
+	void favoritesRejectInvalidPagination() throws Exception {
+		for (String[] invalid : new String[][] { { "page", "-1" }, { "size", "0" }, { "size", "101" } }) {
+			mockMvc.perform(get("/favorites").with(jwt()).param(invalid[0], invalid[1]))
+				.andExpect(status().isBadRequest());
+		}
 	}
 
 	private static ListingView view() {

@@ -1,6 +1,7 @@
 package com.worfwint.markethub.listing.listing;
 
 import java.util.UUID;
+import java.util.Map;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -54,8 +55,11 @@ public class ListingService {
 		return listings.findById(id, sellerId).orElseThrow();
 	}
 
-	public MyListings mine(UUID sellerId, String status) {
-		return new MyListings(listings.findBySeller(sellerId, status), listings.countBySellerPerStatus(sellerId));
+	public MyListings mine(UUID sellerId, String status, int page, int size) {
+		Map<String, Long> counts = listings.countBySellerPerStatus(sellerId);
+		long total = status == null ? counts.values().stream().mapToLong(Long::longValue).sum()
+				: counts.getOrDefault(status, 0L);
+		return new MyListings(listings.findBySeller(sellerId, status, page, size), total, page, size, counts);
 	}
 
 	private ListingView ownListing(long id, UUID sellerId) {

@@ -57,3 +57,11 @@ Existing gateway rate limits apply to requests made through Swagger UI.
 Tests cover dev UI configuration, documentation disabled by default, public access to
 the user definition, generated auth requirements, and flattened listing search parameters.
 Auth/listing integration tests require Docker and are skipped when Docker is unavailable.
+
+## Listing collection responses
+
+Search, favorites, and the caller's listings return distinct summary schemas, not
+full listing details. `/listings/mine` now accepts `page` and `size` and returns
+pagination metadata alongside status counts. See [listing response contracts](LISTING_API.md)
+for fields and frontend migration guidance. The generated Listings definition
+includes the separate schemas and the 200-character description preview limit.

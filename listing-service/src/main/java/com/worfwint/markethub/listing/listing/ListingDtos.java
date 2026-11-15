@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import org.hibernate.validator.constraints.URL;
+import io.swagger.v3.oas.annotations.media.Schema;
 
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.Max;
@@ -60,6 +61,23 @@ public final class ListingDtos {
 			long favoritesCount, boolean favorite, Instant createdAt, Instant updatedAt) {
 	}
 
+	/** Search results contain a bounded preview and one cover photo rather than full details. */
+	public record ListingSummary(long id, String title, long price, String priceUnit, String categoryId,
+			String cityId, Instant createdAt, String coverPhotoUrl, String condition, String sellerType,
+			boolean favorite,
+			@Schema(description = "First 200 characters of the description", maxLength = 200) String descriptionPreview) {
+	}
+
+	/** Card fields for the caller's saved listings. */
+	public record FavoriteListingSummary(long id, String title, long price, String priceUnit, String categoryId,
+			String cityId, Instant createdAt, String coverPhotoUrl, boolean favorite) {
+	}
+
+	/** Account listing rows; full editable data is obtained from GET /listings/{id}. */
+	public record MyListingSummary(long id, String title, long price, String priceUnit, String categoryId,
+			String coverPhotoUrl, String status, long favoritesCount) {
+	}
+
 	/** Query parameters of GET /listings. Every filter is optional. */
 	public record SearchCriteria(
 			@Size(max = 200) String q,
@@ -90,7 +108,7 @@ public final class ListingDtos {
 	}
 
 	/** {@code counts} has the number of the caller's listings per status, for the account tabs. */
-	public record MyListings(List<ListingView> items, Map<String, Long> counts) {
+	public record MyListings(List<MyListingSummary> items, long total, int page, int size, Map<String, Long> counts) {
 	}
 
 }

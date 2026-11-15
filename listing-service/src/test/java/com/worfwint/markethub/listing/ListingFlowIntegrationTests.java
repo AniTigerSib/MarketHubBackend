@@ -65,6 +65,7 @@ class ListingFlowIntegrationTests {
 			.andExpect(jsonPath("$.servers[0].url").value("/"))
 			.andExpect(jsonPath("$.components.securitySchemes.bearerAuth.scheme").value("bearer"))
 			.andExpect(jsonPath("$.components.schemas.Category.properties.icon.example").value("ph ph-car"))
+			.andExpect(jsonPath("$.components.schemas.ListingSummary.properties.descriptionPreview.maxLength").value(200))
 			.andExpect(jsonPath("$.paths['/listings'].get.security").doesNotExist())
 			.andExpect(jsonPath("$.paths['/listings'].post.security[0].bearerAuth").isArray())
 			.andExpect(jsonPath("$.paths['/listings'].get.parameters[?(@.name == 'q')]").isNotEmpty())
@@ -216,7 +217,7 @@ class ListingFlowIntegrationTests {
 		// The heart shows only for the user who saved it
 		mockMvc.perform(get("/listings").param("q", tag).with(as(buyer)))
 			.andExpect(jsonPath("$.items[0].favorite").value(true))
-			.andExpect(jsonPath("$.items[0].favoritesCount").value(1));
+			.andExpect(jsonPath("$.items[0].favoritesCount").doesNotExist());
 		mockMvc.perform(get("/listings").param("q", tag)).andExpect(jsonPath("$.items[0].favorite").value(false));
 
 		mockMvc.perform(get("/favorites").with(as(buyer)))
@@ -230,6 +231,103 @@ class ListingFlowIntegrationTests {
 		// Archived listings can't be newly saved
 		mockMvc.perform(post("/listings/" + id + "/archive").with(as(seller))).andExpect(status().isOk());
 		mockMvc.perform(put("/favorites/" + id).with(as(buyer))).andExpect(status().isNotFound());
+	}
+
+	@Test
+	void searchUsesBoundedSummaryWhileDetailKeepsAllFields() throws Exception {
+		String tag = tag();
+		String description = "Описание ".repeat(70);
+		String request = body(tag + " Phone summary", "electronics", "phones", "msk", 100, "used", "private", true)
+			.replace("Good condition, everything works. Pickup or delivery.", description)
+			.replace("cover.jpg\"]", "cover.jpg\", \"https://cdn.markethub.local/second.jpg\"]");
+		long id = create(seller, request);
+		mockMvc.perform(get("/listings").param("q", tag))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.items[0].id").value(id))
+			.andExpect(jsonPath("$.items[0].descriptionPreview").value(description.substring(0, 200)))
+			.andExpect(jsonPath("$.items[0].coverPhotoUrl").value("https://cdn.markethub.local/cover.jpg"))
+			.andExpect(jsonPath("$.items[0].condition").value("used"))
+			.andExpect(jsonPath("$.items[0].sellerType").value("private"))
+			.andExpect(jsonPath("$.items[0].sellerId").doesNotExist())
+			.andExpect(jsonPath("$.items[0].description").doesNotExist())
+			.andExpect(jsonPath("$.items[0].photoUrls").doesNotExist())
+			.andExpect(jsonPath("$.items[0].contactByMessages").doesNotExist())
+			.andExpect(jsonPath("$.items[0].updatedAt").doesNotExist());
+		mockMvc.perform(get("/listings/" + id))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.description").value(description.strip()))
+			.andExpect(jsonPath("$.photoUrls.length()").value(2))
+			.andExpect(jsonPath("$.sellerId").value(seller.toString()))
+			.andExpect(jsonPath("$.contactByMessages").value(true));
+	}
+
+	@Test
+	void ownListingSummariesPaginateAndKeepCountsAcrossAllStatuses() throws Exception {
+		long first = create(seller, body(tag() + " First phone", "electronics", "phones", "msk", 100, "used", "private", true));
+		long second = create(seller, body(tag() + " Second phone", "electronics", "phones", "msk", 200, "new", "private", false));
+		long third = create(seller, body(tag() + " Archived phone", "electronics", "phones", "msk", 300, "used", "private", true));
+		create(buyer, body(tag() + " Other seller phone", "electronics", "phones", "msk", 50, "used", "private", true));
+		mockMvc.perform(put("/favorites/" + first).with(as(buyer))).andExpect(status().isNoContent());
+		mockMvc.perform(post("/listings/" + third + "/archive").with(as(seller))).andExpect(status().isOk());
+
+		mockMvc.perform(get("/listings/mine").with(as(seller)).param("size", "1"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.total").value(3))
+			.andExpect(jsonPath("$.items.length()").value(1))
+			.andExpect(jsonPath("$.items[0].id").value(third))
+			.andExpect(jsonPath("$.counts.active").value(2))
+			.andExpect(jsonPath("$.counts.archived").value(1));
+		mockMvc.perform(get("/listings/mine").with(as(seller)).param("status", "active").param("page", "1").param("size", "1"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.total").value(2))
+			.andExpect(jsonPath("$.page").value(1))
+			.andExpect(jsonPath("$.size").value(1))
+			.andExpect(jsonPath("$.items[0].id").value(first))
+			.andExpect(jsonPath("$.items[0].favoritesCount").value(1))
+			.andExpect(jsonPath("$.items[0].coverPhotoUrl").value("https://cdn.markethub.local/cover.jpg"))
+			.andExpect(jsonPath("$.items[0].description").doesNotExist())
+			.andExpect(jsonPath("$.items[0].photoUrls").doesNotExist())
+			.andExpect(jsonPath("$.items[0].sellerId").doesNotExist())
+			.andExpect(jsonPath("$.counts.archived").value(1));
+		mockMvc.perform(get("/listings/mine").with(as(seller)).param("page", "1").param("size", "1"))
+			.andExpect(jsonPath("$.items[0].id").value(second))
+			.andExpect(jsonPath("$.items[0].coverPhotoUrl").doesNotExist());
+		mockMvc.perform(get("/listings/mine").with(as(seller)).param("status", "active").param("page", "20"))
+			.andExpect(jsonPath("$.items").isEmpty())
+			.andExpect(jsonPath("$.total").value(2));
+		mockMvc.perform(get("/listings/mine").with(as(UUID.randomUUID())))
+			.andExpect(jsonPath("$.total").value(0))
+			.andExpect(jsonPath("$.items").isEmpty())
+			.andExpect(jsonPath("$.counts.active").value(0))
+			.andExpect(jsonPath("$.counts.archived").value(0));
+	}
+
+	@Test
+	void favoritesReturnOnlyCardFieldsAndKeepPaginationForArchivedListings() throws Exception {
+		long first = create(seller, body(tag() + " Saved phone", "electronics", "phones", "msk", 100, "used", "private", true));
+		long second = create(seller, body(tag() + " Saved laptop", "electronics", "laptops", "msk", 200, "new", "business", false));
+		mockMvc.perform(put("/favorites/" + first).with(as(buyer))).andExpect(status().isNoContent());
+		mockMvc.perform(put("/favorites/" + second).with(as(buyer))).andExpect(status().isNoContent());
+		mockMvc.perform(post("/listings/" + first + "/archive").with(as(seller))).andExpect(status().isOk());
+		mockMvc.perform(get("/favorites").with(as(buyer)).param("size", "1"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.total").value(2))
+			.andExpect(jsonPath("$.items.length()").value(1))
+			.andExpect(jsonPath("$.items[0].id").value(second))
+			.andExpect(jsonPath("$.items[0].favorite").value(true))
+			.andExpect(jsonPath("$.items[0].coverPhotoUrl").doesNotExist())
+			.andExpect(jsonPath("$.items[0].description").doesNotExist())
+			.andExpect(jsonPath("$.items[0].descriptionPreview").doesNotExist())
+			.andExpect(jsonPath("$.items[0].photoUrls").doesNotExist())
+			.andExpect(jsonPath("$.items[0].sellerId").doesNotExist())
+			.andExpect(jsonPath("$.items[0].contactByMessages").doesNotExist());
+		mockMvc.perform(get("/favorites").with(as(buyer)).param("page", "1").param("size", "1"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.items[0].id").value(first))
+			.andExpect(jsonPath("$.items[0].coverPhotoUrl").value("https://cdn.markethub.local/cover.jpg"));
+		mockMvc.perform(get("/favorites").with(as(buyer)).param("page", "2").param("size", "1"))
+			.andExpect(jsonPath("$.items").isEmpty())
+			.andExpect(jsonPath("$.total").value(2));
 	}
 
 	/** A random word that can't appear in other tests' listings. */

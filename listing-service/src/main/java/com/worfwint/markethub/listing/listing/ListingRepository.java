@@ -18,6 +18,8 @@ import org.springframework.stereotype.Repository;
 
 import com.worfwint.markethub.listing.listing.ListingDtos.ListingRequest;
 import com.worfwint.markethub.listing.listing.ListingDtos.ListingView;
+import com.worfwint.markethub.listing.listing.ListingDtos.ListingSummary;
+import com.worfwint.markethub.listing.listing.ListingDtos.MyListingSummary;
 import com.worfwint.markethub.listing.listing.ListingDtos.Page;
 import com.worfwint.markethub.listing.listing.ListingDtos.SearchCriteria;
 
@@ -25,7 +27,7 @@ import com.worfwint.markethub.listing.listing.ListingDtos.SearchCriteria;
 public class ListingRepository {
 
 	/** Listing columns plus favorites count and whether {@code :viewerId} saved it. */
-	public static final String SELECT_LISTING = """
+	private static final String SELECT_LISTING = """
 			SELECT l.id, l.seller_id, l.category_id, l.subcategory_id, l.city_id, l.title, l.description,
 			       l.price, l.price_unit, l.item_condition, l.seller_type, l.photo_urls,
 			       l.contact_by_messages, l.contact_by_phone, l.status, l.created_at, l.updated_at,
@@ -89,7 +91,7 @@ public class ListingRepository {
 	}
 
 	/** Active listings matching every given filter, sorted and paginated. */
-	public Page<ListingView> search(SearchCriteria criteria, UUID viewerId) {
+	public Page<ListingSummary> search(SearchCriteria criteria, UUID viewerId) {
 		StringBuilder where = new StringBuilder(" WHERE l.status = 'active'");
 		Map<String, Object> params = new LinkedHashMap<>();
 
@@ -137,26 +139,45 @@ public class ListingRepository {
 		};
 
 		long total = jdbc.sql("SELECT count(*) FROM listings l" + where).params(params).query(Long.class).single();
-		List<ListingView> items = jdbc.sql(SELECT_LISTING + where + orderBy + " LIMIT :limit OFFSET :offset")
+		List<ListingSummary> items = jdbc.sql("""
+				SELECT l.id, l.title, l.price, l.price_unit, l.category_id, l.city_id, l.created_at,
+				       l.photo_urls[1] AS cover_photo_url, l.item_condition, l.seller_type,
+				       left(l.description, 200) AS description_preview,
+				       EXISTS (SELECT 1 FROM favorites f
+				               WHERE f.listing_id = l.id AND f.user_id = CAST(:viewerId AS uuid)) AS favorite
+				FROM listings l
+				""" + where + orderBy + " LIMIT :limit OFFSET :offset")
 			.params(params)
 			.param("viewerId", viewerId, Types.OTHER)
 			.param("limit", criteria.size())
 			.param("offset", (long) criteria.page() * criteria.size())
-			.query(ListingRepository::mapListing)
+			.query((rs, rowNum) -> new ListingSummary(rs.getLong("id"), rs.getString("title"),
+					rs.getLong("price"), rs.getString("price_unit"), rs.getString("category_id"),
+					rs.getString("city_id"), rs.getObject("created_at", OffsetDateTime.class).toInstant(),
+					rs.getString("cover_photo_url"), rs.getString("item_condition"), rs.getString("seller_type"),
+					rs.getBoolean("favorite"), rs.getString("description_preview")))
 			.list();
 		return new Page<>(items, total, criteria.page(), criteria.size());
 	}
 
 	/** The seller's own listings, newest first; {@code status} null means all. */
-	public List<ListingView> findBySeller(UUID sellerId, String status) {
-		return jdbc.sql(SELECT_LISTING + """
-				 WHERE l.seller_id = :sellerId AND (CAST(:status AS varchar) IS NULL OR l.status = :status)
-				 ORDER BY l.created_at DESC, l.id DESC
+	public List<MyListingSummary> findBySeller(UUID sellerId, String status, int page, int size) {
+		return jdbc.sql("""
+				SELECT l.id, l.title, l.price, l.price_unit, l.category_id,
+				       l.photo_urls[1] AS cover_photo_url, l.status,
+				       (SELECT count(*) FROM favorites f WHERE f.listing_id = l.id) AS favorites_count
+				FROM listings l
+				WHERE l.seller_id = :sellerId AND (CAST(:status AS varchar) IS NULL OR l.status = :status)
+				ORDER BY l.created_at DESC, l.id DESC
+				LIMIT :limit OFFSET :offset
 				""")
 			.param("sellerId", sellerId)
-			.param("viewerId", sellerId, Types.OTHER)
 			.param("status", status, Types.VARCHAR)
-			.query(ListingRepository::mapListing)
+			.param("limit", size)
+			.param("offset", (long) page * size)
+			.query((rs, rowNum) -> new MyListingSummary(rs.getLong("id"), rs.getString("title"),
+					rs.getLong("price"), rs.getString("price_unit"), rs.getString("category_id"),
+					rs.getString("cover_photo_url"), rs.getString("status"), rs.getLong("favorites_count")))
 			.list();
 	}
 
@@ -203,7 +224,7 @@ public class ListingRepository {
 		return fields;
 	}
 
-	public static ListingView mapListing(ResultSet rs, int rowNum) throws SQLException {
+	private static ListingView mapListing(ResultSet rs, int rowNum) throws SQLException {
 		String[] photos = (String[]) rs.getArray("photo_urls").getArray();
 		return new ListingView(rs.getLong("id"), rs.getObject("seller_id", UUID.class), rs.getString("category_id"),
 				rs.getString("subcategory_id"), rs.getString("city_id"), rs.getString("title"),

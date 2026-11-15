@@ -412,12 +412,12 @@ and favorites. Tokens are checked the same way as in user-service (section 4.2).
 |---|---|---|
 | `GET /categories` | public | All 10 categories with their subcategories, names in English and Russian, Phosphor icon CSS classes, and the number of active listings in each |
 | `GET /cities` | public | The 5 cities, names in English and Russian |
-| `GET /listings` | public (token optional) | Search active listings: filters, sort, pagination (5.3) |
+| `GET /listings` | public (token optional) | Search active listings: compact summaries, filters, sort, pagination (5.3) |
 | `GET /listings/{id}` | public (token optional) | One listing. Archived listings are visible only to their seller; others get `404`. |
 | `POST /listings` | token | Create a listing; it goes live immediately. `201` with the listing. |
 | `PUT /listings/{id}` | token, seller only | Replace all editable fields. `403` for other users, `409` if archived. |
 | `POST /listings/{id}/archive` | token, seller only | "Mark as sold": removes it from search. Repeating it is harmless. |
-| `GET /listings/mine?status=active\|archived` | token | The caller's listings, newest first, plus `counts` per status for the account tabs |
+| `GET /listings/mine?status=active\|archived` | token | The caller's compact listing rows, paginated by `page` and `size`, newest first, plus `counts` per status |
 | `GET /favorites?page&size` | token | The caller's saved listings, most recently saved first (including ones archived since) |
 | `PUT /favorites/{listingId}` | token | Save a listing; repeating it is harmless. `404` if the listing isn't active. |
 | `DELETE /favorites/{listingId}` | token | Remove from favorites |
@@ -451,10 +451,17 @@ saved them (`favorite: true`). Without one, `favorite` is always `false`.
 | `photoUrls` | Up to 10 `http(s)` URLs; the first is the cover. Stored as given; there's no upload yet. |
 | `contactByMessages`, `contactByPhone` | At least one must be `true` |
 
-**Listing response** adds `id` (a number, shown as "Listing No."), `sellerId`, `status`
+**Full listing response** (`GET /listings/{id}` and create/update/archive responses) adds `id` (a number, shown as "Listing No."), `sellerId`, `status`
 (`active` or `archived`), `favoritesCount`, `favorite`, `createdAt` and `updatedAt`. It
 returns ids for category, subcategory and city; the client looks up their names from
 `/categories` and `/cities`. To show the seller, the client calls `GET /users/id/{sellerId}`.
+
+List endpoints use smaller SQL projections and distinct response DTOs: search returns
+a 200-character `descriptionPreview` and one `coverPhotoUrl`; favorites return card
+fields; the account list returns status and favorite totals. All three endpoints accept
+zero-based `page` (default 0) and `size` (default 24, maximum 100). `/listings/mine`
+also returns `total`, `page`, and `size`, preserving `counts` across all statuses.
+See [listing response contracts](LISTING_API.md) for exact fields and client migration.
 
 ### 5.2 Database (`listing-db`)
 

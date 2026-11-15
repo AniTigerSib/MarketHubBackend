@@ -7,7 +7,6 @@ import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -19,15 +18,17 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.worfwint.markethub.listing.listing.ListingDtos.ListingRequest;
 import com.worfwint.markethub.listing.listing.ListingDtos.ListingView;
+import com.worfwint.markethub.listing.listing.ListingDtos.ListingSummary;
 import com.worfwint.markethub.listing.listing.ListingDtos.MyListings;
 import com.worfwint.markethub.listing.listing.ListingDtos.Page;
 import com.worfwint.markethub.listing.listing.ListingDtos.SearchCriteria;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Max;
 
 @RestController
-@Validated
 public class ListingController {
 
 	private final ListingService listingService;
@@ -41,7 +42,7 @@ public class ListingController {
 
 	/** Public search. With a token, each listing also says whether the caller saved it. */
 	@GetMapping("/listings")
-	public Page<ListingView> search(@Valid SearchCriteria criteria, @AuthenticationPrincipal Jwt jwt) {
+	public Page<ListingSummary> search(@Valid SearchCriteria criteria, @AuthenticationPrincipal Jwt jwt) {
 		return listings.search(criteria, userIdOrNull(jwt));
 	}
 
@@ -74,8 +75,10 @@ public class ListingController {
 	@GetMapping("/listings/mine")
 	@SecurityRequirement(name = "bearerAuth")
 	public MyListings mine(@AuthenticationPrincipal Jwt jwt,
-			@RequestParam(required = false) @Pattern(regexp = "active|archived") String status) {
-		return listingService.mine(userId(jwt), status);
+			@RequestParam(required = false) @Pattern(regexp = "active|archived") String status,
+			@RequestParam(defaultValue = "0") @Min(0) int page,
+			@RequestParam(defaultValue = "24") @Min(1) @Max(100) int size) {
+		return listingService.mine(userId(jwt), status, page, size);
 	}
 
 	static UUID userId(Jwt jwt) {
